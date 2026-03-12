@@ -1,4 +1,4 @@
-base_model_name: /home/chy/.cache/huggingface/hub/models--unsloth--Qwen3-1.7B-Base-unsloth-bnb-4bit/snapshots/c7079ee9a92d69fbe9e6616dea1888bf0fb0bbca
+base_model_name: /home/chy/.cache/huggingface/hub/models--Qwen--Qwen3-1.7B-Base/snapshots/ea980cb0a6c2ae4b936e82123acc929f1cec04c1
 cold_start_model: outputs/sft-qwen3-1.7b
 train_dataset: data/grpo/train_grpo_2k_short.jsonl
 output_dir: outputs/grpo-qwen3-1.7b
@@ -6,7 +6,7 @@ seed: 42
 
 max_seq_length: 1024
 max_prompt_length: 512
-max_completion_length: 384
+max_completion_length: 512
 
 learning_rate: 1.0e-6
 epochs: 1
@@ -19,6 +19,16 @@ num_generations: 4
 num_iterations: 1
 beta: 0.0
 loss_type: dapo
+temperature: 1.0
+top_p: 1.0
+top_k:
+min_p:
+repetition_penalty: 1.0
+generation_kwargs:
+  remove_invalid_values: true
+  renormalize_logits: true
+bf16:
+fp16: false
 mask_truncated_completions: true
 top_entropy_quantile: 1.0
 
@@ -26,5 +36,5 @@ logging_steps: 10
 log_completions: true
 num_completions_to_print: 2
 
-use_unsloth: true
+use_unsloth: false
 use_vllm: false

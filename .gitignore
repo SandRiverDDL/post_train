@@ -36,4 +36,4 @@ data/*short*.jsonl
 .idea/
 .vscode/
 
-unsloth_compiled/
+unsloth_compiled_cache/

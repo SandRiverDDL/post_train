@@ -3,6 +3,7 @@
 ## 当前结论
 
 SFT 阶段的核心阻塞已经解除。
+GRPO 阶段已进入真实调试，但当前仍被模型加载后的 dtype/量化兼容问题阻塞。
 
 当前最可信的结论是：
 
@@ -104,7 +105,96 @@ SFT 阶段的核心阻塞已经解除。
 
 1. `MATH500 test` 的正式结果还可以补跑。
 2. 训练集上的 `normalized_accuracy` 仍然不高，说明这版 SFT 更偏向“协议稳定 + 可用 benchmark 提升”，而不是对训练题强记忆。
-3. 进入 GRPO 前，reward contract 和 rollout 配置仍需单独设计。
+3. GRPO 虽然已有最小代码骨架，但在真实 GPU 环境中运行 `scripts/train_grpo.py --config configs/grpo.yaml` 时，仍会在 generation forward 阶段报：
+
+```text
+RuntimeError: expected mat1 and mat2 to have the same dtype, but got: float != c10::BFloat16
+```
+
+当前判断：
+
+- 这不是 reward、数据字段或 boxed 协议解析问题
+- 主要是 `unsloth` 4bit 基座快照自带量化配置，与当前 HF + PEFT GRPO 路径的计算 dtype 仍未完全统一
+- Phase 2 当前最优先工作不是继续改 reward，而是先把 GRPO 训练真实跑通
+
+## GRPO 调试上下文
+
+### 已完成的 GRPO 实现
+
+当前仓库已经有以下 Phase 2 最小代码骨架：
+
+- [scripts/prepare_grpo_data.py](/home/chy/code/active/rl/scripts/prepare_grpo_data.py)
+- [scripts/train_grpo.py](/home/chy/code/active/rl/scripts/train_grpo.py)
+- [src/rl/grpo.py](/home/chy/code/active/rl/src/rl/grpo.py)
+- [configs/grpo.yaml](/home/chy/code/active/rl/configs/grpo.yaml)
+- [tests/test_grpo.py](/home/chy/code/active/rl/tests/test_grpo.py)
+
+目前已经确认：
+
+- GRPO 不再卡在脚本入口或 `GRPOConfig` 初始化
+- `trl/peft` 的 `warnings_issued` / `add_model_tags` 兼容问题已修复
+- `BitsAndBytesConfig` 导入错误已修复
+- `bf16/use_cpu` 初始化校验已修复
+- 代码在受限环境里已经可以推进到 `trainer.train()`，不再是启动即崩
+
+### 当前真实阻塞
+
+在用户的真实 GPU 环境中，`train_grpo.py` 仍稳定报同一类错误：
+
+```text
+RuntimeError: expected mat1 and mat2 to have the same dtype, but got: float != c10::BFloat16
+```
+
+错误栈稳定落在：
+
+- `peft/tuners/lora/layer.py`
+- `result = self.base_layer(x, *args, **kwargs)`
+- 上层对应 `Qwen3` 的 `gate_proj/down_proj`
+
+这说明报错发生在：
+
+- generation forward
+- LoRA 包装层进入 base linear 之前
+- 不是 reward 函数，不是答案解析，不是数据字段缺失
+
+### 已知环境与关键事实
+
+- 基座模型：
+  - `unsloth/Qwen3-1.7B-Base-unsloth-bnb-4bit`
+- 当前 cold start adapter：
+  - `outputs/sft-qwen3-1.7b`
+- `adapter_config.json` 显示：
+  - `auto_mapping.parent_library = transformers.models.qwen3.modeling_qwen3`
+  - `unsloth_fixed = true`
+- 当前 SFT adapter 中可训练 LoRA 参数实际是 `torch.float32`
+- 当前 GRPO 路径为了规避前一轮错误，已经尝试：
+  - 显式传 `quantization_config`
+  - 显式传 `torch_dtype`
+  - `autocast_adapter_dtype=False`
+  - 将 `requires_grad=True` 的参数强制转到推断的 `compute_dtype`
+
+但根据真实报错看，这些改动仍没有让整条计算路径完全统一 dtype。
+
+### 需要 reviewer 理解的判断
+
+当前最重要的判断不是“reward 有没有问题”，而是：
+
+1. 这个 `unsloth-bnb-4bit` 基座快照是否会用自带 `quantization_config` 覆盖我们手动设置的 compute dtype
+2. 当前 SFT adapter 是否适合直接挂到这条 HF 4bit GRPO 路径上继续训练
+3. 是否应该放弃继续和这个 `unsloth` 量化快照硬兼容，改成：
+   - 切换到标准 HF Qwen3 base
+   - 自己完全控制 `BitsAndBytesConfig`
+   - 再挂现有 LoRA adapter
+
+### reviewer 建议优先检查
+
+- [scripts/train_grpo.py](/home/chy/code/active/rl/scripts/train_grpo.py)
+  - `load_model_and_tokenizer()` 中的 `quantization_config`
+  - `torch_dtype`
+  - LoRA 参数 dtype 对齐逻辑
+- 当前基座模型快照和 SFT adapter 的兼容性
+- 是否需要在 GRPO 路径显式调用 `prepare_model_for_kbit_training`
+- 是否应直接更换 GRPO 基座加载策略，而不是继续 patch 当前 `unsloth-bnb-4bit` 快照
 
 ## 对下一阶段的影响
 
@@ -114,6 +204,7 @@ Phase 2 不应再把“如何学会 boxed 协议”当成主问题。
 
 1. boxed 协议已由 `2k short response` 这条 SFT 基线提供
 2. 重点转向：
+   - 模型加载与量化/精度兼容
    - reward 设计
    - rollout 稳定性
    - base vs SFT vs GRPO 的对照

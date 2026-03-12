@@ -167,7 +167,9 @@ def format_eval_text(question: str, final_answer: str) -> str:
 def format_protocol_prompt(question: str) -> str:
     return (
         f"Question:\n{question}\n\n"
+        "要求：\n"
+        "请给出必要推理。\n"
+        "最后一行必须严格写成：\n"
+        "Final answer: \\boxed{...}\n\n"
         "Solution:\n"
-        "请给出必要推理。最后一行必须严格写成：\n"
-        "Final answer: \\boxed{...}\n"
     )

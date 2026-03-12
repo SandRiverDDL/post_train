@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import importlib
 from pathlib import Path
 from typing import Any
 
 from datasets import Dataset
+import torch
+from torch import nn
 from transformers import TrainerCallback
 
 from rl.answers import evaluate_prediction
@@ -18,6 +21,8 @@ def build_grpo_prompt(question: str) -> str:
 
 def build_grpo_dataset(path: str | Path) -> Dataset:
     rows = read_jsonl(path)
+    for row in rows:
+        row["prompt"] = build_grpo_prompt(str(row["question"]))
     return Dataset.from_list(rows)
 
 
@@ -88,6 +93,88 @@ def reward_functions() -> list:
 
 def default_reward_weights() -> list[float]:
     return [1.0, 0.02, 0.02]
+
+
+def ensure_trl_model_compat(model: Any) -> Any:
+    # `trl==0.24.0` 会直接访问 `warnings_issued` 和 `add_model_tags`。
+    # 在当前 `peft/transformers/unsloth` 组合下，这些属性不一定存在，需要显式补齐。
+    if not hasattr(model, "warnings_issued") or getattr(model, "warnings_issued") is None:
+        model.warnings_issued = {}
+
+    if not hasattr(model, "add_model_tags"):
+        def _add_model_tags(_: Any) -> None:
+            return None
+
+        model.add_model_tags = _add_model_tags
+
+    base_model = getattr(model, "base_model", None)
+    if base_model is not None:
+        if not hasattr(base_model, "warnings_issued") or getattr(base_model, "warnings_issued") is None:
+            base_model.warnings_issued = model.warnings_issued
+        if not hasattr(base_model, "add_model_tags"):
+            base_model.add_model_tags = model.add_model_tags
+
+    return model
+
+
+def model_uses_kbit_quantization(model: Any) -> bool:
+    return bool(getattr(model, "is_loaded_in_4bit", False) or getattr(model, "is_loaded_in_8bit", False))
+
+
+def find_unquantized_linear_modules(model: Any) -> list[str]:
+    names: list[str] = []
+    for name, module in model.named_modules():
+        if type(module) is nn.Linear:
+            names.append(name)
+    return names
+
+
+def stabilize_unquantized_kbit_linears(model: Any) -> tuple[Any, list[str]]:
+    if not model_uses_kbit_quantization(model):
+        return model, []
+
+    unquantized_linear_names = find_unquantized_linear_modules(model)
+    names_to_upcast = [name for name in unquantized_linear_names if not name.endswith("lm_head")]
+
+    for name, module in model.named_modules():
+        if name in names_to_upcast:
+            module.to(dtype=torch.float32)
+
+    return model, names_to_upcast
+
+
+def align_lm_head_dtype(model: Any, target_dtype: torch.dtype) -> bool:
+    lm_head = getattr(model, "lm_head", None)
+    if type(lm_head) is not nn.Linear:
+        return False
+    if lm_head.weight.dtype == target_dtype:
+        return False
+    lm_head.to(dtype=target_dtype)
+    return True
+
+
+def ensure_trl_vllm_import_compat(*, use_vllm: bool) -> None:
+    try:
+        sampling_params = importlib.import_module("vllm.sampling_params")
+    except ImportError:
+        return
+
+    if hasattr(sampling_params, "GuidedDecodingParams"):
+        return
+
+    structured_outputs_cls = getattr(sampling_params, "StructuredOutputsParams", None)
+    if structured_outputs_cls is None:
+        return
+
+    if use_vllm:
+        raise RuntimeError(
+            "当前环境的 vLLM 不再提供 GuidedDecodingParams，而 trl==0.24.0 仍依赖该接口。"
+            "如果要启用 use_vllm=true，请将 vllm 降到 trl 支持的版本，或同步升级 trl。"
+        )
+
+    # 这里只是为了让 `from trl import GRPOTrainer` 在 `use_vllm=false` 时可以正常导入。
+    # 真正走 vLLM 路径时，trl 仍需要兼容的新接口。
+    sampling_params.GuidedDecodingParams = structured_outputs_cls
 
 
 def response_token_length(solution: str, tokenizer) -> int:

@@ -54,6 +54,14 @@ class GRPOTrainConfig(BaseModel):
     num_iterations: int = 1
     beta: float = 0.0
     loss_type: str = "dapo"
+    temperature: float = 1.0
+    top_p: float = 1.0
+    top_k: int | None = None
+    min_p: float | None = None
+    repetition_penalty: float = 1.0
+    generation_kwargs: dict = Field(default_factory=dict)
+    bf16: bool | None = None
+    fp16: bool = False
     mask_truncated_completions: bool = True
     top_entropy_quantile: float = Field(default=1.0, gt=0.0, le=1.0)
     logging_steps: int = 10

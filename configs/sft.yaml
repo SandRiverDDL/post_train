@@ -1,4 +1,6 @@
-model_name: /home/chy/.cache/huggingface/hub/models--unsloth--Qwen3-1.7B-Base-unsloth-bnb-4bit/snapshots/c7079ee9a92d69fbe9e6616dea1888bf0fb0bbca
+model_name: /home/chy/.cache/huggingface/hub/models--Qwen--Qwen3-1.7B-Base/snapshots/ea980cb0a6c2ae4b936e82123acc929f1cec04c1
+#/home/chy/.cache/huggingface/hub/models--Qwen--Qwen3-1.7B-Base/snapshots/ea980cb0a6c2ae4b936e82123acc929f1cec04c1
+#/home/chy/.cache/huggingface/hub/models--unsloth--Qwen3-1.7B-Base-unsloth-bnb-4bit/snapshots/c7079ee9a92d69fbe9e6616dea1888bf0fb0bbca
 seed: 42
 train_dataset: data/train_sft.jsonl
 eval_dataset: data/eval/gsm8k_dev200.jsonl
