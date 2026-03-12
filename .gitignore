@@ -1,0 +1,39 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Python cache
+**/__pycache__/
+
+# 训练/评测输出
+outputs/
+results/
+logs/
+
+# 临时文件
+tmp/
+*.log
+*.out
+*.err
+
+# 本地数据工件
+data/train_*.jsonl
+data/grpo_*.jsonl
+data/*tiny_overfit*.jsonl
+data/*short*.jsonl
+
+# 保留冻结评测工件
+!data/eval/
+!data/eval/*.jsonl
+
+# 如需保留特定训练样本清单，可在这里显式反忽略
+# !data/train_sft_manifest.jsonl
+
+# 编辑器/系统文件
+.DS_Store
+.idea/
+.vscode/
+
+unsloth_compiled/
