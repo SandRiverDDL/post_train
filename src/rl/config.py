@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -42,6 +43,7 @@ class GRPOTrainConfig(BaseModel):
     output_dir: Path = Path("outputs/grpo")
     seed: int = 42
     max_seq_length: int = 1024
+    attn_implementation: str = "sdpa"
     max_prompt_length: int = 512
     max_completion_length: int = Field(default=384, ge=1)
     learning_rate: float = 1e-6
@@ -67,8 +69,15 @@ class GRPOTrainConfig(BaseModel):
     logging_steps: int = 10
     log_completions: bool = True
     num_completions_to_print: int = 2
-    use_unsloth: bool = True
     use_vllm: bool = False
+    vllm_mode: Literal["server", "colocate"] = "server"
+    vllm_server_base_url: str | None = None
+    vllm_server_host: str = "127.0.0.1"
+    vllm_server_port: int = 8000
+    vllm_server_timeout: float = Field(default=240.0, gt=0.0)
+    vllm_gpu_memory_utilization: float = Field(default=0.85, gt=0.0, le=1.0)
+    vllm_tensor_parallel_size: int = Field(default=1, ge=1)
+    vllm_data_parallel_size: int = Field(default=1, ge=1)
 
 
 def load_config(path: str | Path) -> SFTConfig:

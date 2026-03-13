@@ -6,8 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from datasets import Dataset
-import torch
-from torch import nn
 from transformers import TrainerCallback
 
 from rl.answers import evaluate_prediction
@@ -97,7 +95,7 @@ def default_reward_weights() -> list[float]:
 
 def ensure_trl_model_compat(model: Any) -> Any:
     # `trl==0.24.0` 会直接访问 `warnings_issued` 和 `add_model_tags`。
-    # 在当前 `peft/transformers/unsloth` 组合下，这些属性不一定存在，需要显式补齐。
+    # 在当前 `peft/transformers` 包装模型上，这些属性不一定存在，需要显式补齐。
     if not hasattr(model, "warnings_issued") or getattr(model, "warnings_issued") is None:
         model.warnings_issued = {}
 
@@ -117,64 +115,23 @@ def ensure_trl_model_compat(model: Any) -> Any:
     return model
 
 
-def model_uses_kbit_quantization(model: Any) -> bool:
-    return bool(getattr(model, "is_loaded_in_4bit", False) or getattr(model, "is_loaded_in_8bit", False))
-
-
-def find_unquantized_linear_modules(model: Any) -> list[str]:
-    names: list[str] = []
-    for name, module in model.named_modules():
-        if type(module) is nn.Linear:
-            names.append(name)
-    return names
-
-
-def stabilize_unquantized_kbit_linears(model: Any) -> tuple[Any, list[str]]:
-    if not model_uses_kbit_quantization(model):
-        return model, []
-
-    unquantized_linear_names = find_unquantized_linear_modules(model)
-    names_to_upcast = [name for name in unquantized_linear_names if not name.endswith("lm_head")]
-
-    for name, module in model.named_modules():
-        if name in names_to_upcast:
-            module.to(dtype=torch.float32)
-
-    return model, names_to_upcast
-
-
-def align_lm_head_dtype(model: Any, target_dtype: torch.dtype) -> bool:
-    lm_head = getattr(model, "lm_head", None)
-    if type(lm_head) is not nn.Linear:
-        return False
-    if lm_head.weight.dtype == target_dtype:
-        return False
-    lm_head.to(dtype=target_dtype)
-    return True
-
-
-def ensure_trl_vllm_import_compat(*, use_vllm: bool) -> None:
+def ensure_trl_vllm_import_compat(*, use_vllm: bool, vllm_mode: str | None = None) -> bool:
     try:
         sampling_params = importlib.import_module("vllm.sampling_params")
     except ImportError:
-        return
+        return False
 
     if hasattr(sampling_params, "GuidedDecodingParams"):
-        return
+        return False
 
     structured_outputs_cls = getattr(sampling_params, "StructuredOutputsParams", None)
     if structured_outputs_cls is None:
-        return
+        return False
 
-    if use_vllm:
-        raise RuntimeError(
-            "当前环境的 vLLM 不再提供 GuidedDecodingParams，而 trl==0.24.0 仍依赖该接口。"
-            "如果要启用 use_vllm=true，请将 vllm 降到 trl 支持的版本，或同步升级 trl。"
-        )
-
-    # 这里只是为了让 `from trl import GRPOTrainer` 在 `use_vllm=false` 时可以正常导入。
-    # 真正走 vLLM 路径时，trl 仍需要兼容的新接口。
+    # `trl==0.24.0` 在导入 `GRPOTrainer` 时会无条件导入旧接口。
+    # 当前 vLLM 版本已将其重命名为 `StructuredOutputsParams`，二者都支持 `regex=` 初始化。
     sampling_params.GuidedDecodingParams = structured_outputs_cls
+    return True
 
 
 def response_token_length(solution: str, tokenizer) -> int:

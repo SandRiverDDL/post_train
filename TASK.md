@@ -14,19 +14,20 @@
 - [x] 完成 GRPO v1 的最小代码骨架：数据准备、训练入口、reward contract、配置与最小单测
 - [x] 修复 GRPO 初始化阶段的 `trl/peft` 兼容问题（`warnings_issued` / `add_model_tags`）
 - [x] 修复 GRPO HF 4bit 路径的导入与精度参数初始化问题（`BitsAndBytesConfig`、`bf16/use_cpu`）
+- [x] 将 GRPO 主路径收敛到官方 `Qwen3-1.7B-Base` + `QLoRA continuation`
+- [x] 将 GRPO rollout 后端切换为 `vLLM server` 配置主路径
 
 ## 当前结论
 
 - [x] 当前 SFT MVP 已完成
 - [x] 当前最推荐的 SFT 冷启动数据形态是：`NuminaMath 2k + response token 64~256`
 - [x] 当前不再推荐直接使用原始长解答 `3k` 作为 GRPO 冷启动唯一 SFT 数据
-- [x] GRPO 已经不再卡在“脚本无法启动”的阶段，当前阻塞点收敛到模型加载后的 dtype/量化兼容问题
+- [x] GRPO 训练入口已经收敛到“官方 base + PEFT + TRL + vLLM server”的单一路径
 
 ## 下一步
 
 - [ ] 补跑 `MATH500 test` 正式结果，作为 Phase 1 收尾指标
 - [ ] 固化 SFT 最佳配置到文档和结果记录
-- [ ] reviewer 先审 `train_grpo.py` 的 dtype / 量化兼容问题，给出是否需要切基座的结论
-- [ ] 在 reviewer 结论基础上修复 GRPO 真实 GPU 环境下的 `float != bfloat16` 报错
-- [ ] 修复后重新验证 `scripts/train_grpo.py --config configs/grpo.yaml` 至少稳定跑过前几个训练 step
+- [ ] 在真实 GPU 环境验证 `vLLM server + GRPOTrainer` 至少稳定跑过前几个训练 step
+- [ ] 验证 `vLLM` 权重同步后 reward / rollout 日志是否与 HF 后端口径一致
 - [ ] GRPO 跑通后，再补 Phase 2 对照：`base vs SFT vs GRPO`

@@ -17,12 +17,10 @@ from rl.grpo import (
     JsonlMetricsCallback,
     build_grpo_dataset,
     build_grpo_prompt,
-    align_lm_head_dtype,
     default_reward_weights,
     ensure_trl_model_compat,
     ensure_trl_vllm_import_compat,
     reward_functions,
-    stabilize_unquantized_kbit_linears,
 )
 from rl.io import ensure_parent, read_jsonl
 
@@ -39,57 +37,36 @@ def _looks_like_adapter_dir(path: str | Path) -> bool:
 
 
 def load_model_and_tokenizer(cfg):
-    if cfg.use_unsloth:
-        import unsloth  # noqa: F401
-        from peft import PeftModel
-        from unsloth import FastLanguageModel
-
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=cfg.base_model_name,
-            max_seq_length=cfg.max_seq_length,
-            load_in_4bit=True,
-        )
-        if _looks_like_adapter_dir(cfg.cold_start_model):
-            model = PeftModel.from_pretrained(
-                model,
-                str(cfg.cold_start_model),
-                is_trainable=True,
-                autocast_adapter_dtype=False,
-            )
-        return ensure_trl_model_compat(model), tokenizer
-
     from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
     tokenizer = AutoTokenizer.from_pretrained(cfg.base_model_name, trust_remote_code=True)
+    tokenizer.padding_side = "left"
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
     compute_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_compute_dtype=compute_dtype,
     )
-    model = AutoModelForCausalLM.from_pretrained(
-        cfg.base_model_name,
-        trust_remote_code=True,
-        quantization_config=quantization_config,
-        dtype=compute_dtype,
-        device_map="auto",
-        low_cpu_mem_usage=True,
-    )
-    model, upcast_linear_names = stabilize_unquantized_kbit_linears(model)
-    if upcast_linear_names:
-        preview = ", ".join(upcast_linear_names[:6])
-        print(
-            "[grpo] 检测到未量化的内部 Linear 模块，已将其提升到 float32 以规避 dtype 冲突："
-            f"{preview}"
-        )
-    if align_lm_head_dtype(model, compute_dtype):
-        print(f"[grpo] 已将 lm_head 对齐到 {compute_dtype}，避免 generation 阶段输出头 dtype 冲突。")
+    model_kwargs = {
+        "trust_remote_code": True,
+        "quantization_config": quantization_config,
+        "dtype": compute_dtype,
+        "device_map": "auto",
+        "low_cpu_mem_usage": True,
+        "attn_implementation": cfg.attn_implementation,
+    }
+    model = AutoModelForCausalLM.from_pretrained(cfg.base_model_name, **model_kwargs)
     if _looks_like_adapter_dir(cfg.cold_start_model):
         model = PeftModel.from_pretrained(
             model,
             str(cfg.cold_start_model),
             is_trainable=True,
         )
+    if getattr(model, "config", None) is not None:
+        model.config.use_cache = False
     return ensure_trl_model_compat(model), tokenizer
 
 
@@ -121,7 +98,9 @@ def main() -> None:
     args = parse_args()
     cfg = load_grpo_config(args.config)
     preview_samples(cfg.train_dataset)
-    ensure_trl_vllm_import_compat(use_vllm=cfg.use_vllm)
+    compat_applied = ensure_trl_vllm_import_compat(use_vllm=cfg.use_vllm, vllm_mode=cfg.vllm_mode)
+    if compat_applied:
+        print("[grpo] 已为当前 trl/vLLM 组合应用 server 模式导入兼容。")
 
     from trl import GRPOConfig, GRPOTrainer
 
@@ -163,6 +142,13 @@ def main() -> None:
         num_completions_to_print=cfg.num_completions_to_print,
         reward_weights=default_reward_weights(),
         use_vllm=cfg.use_vllm,
+        vllm_mode=cfg.vllm_mode,
+        vllm_server_base_url=cfg.vllm_server_base_url,
+        vllm_server_host=cfg.vllm_server_host,
+        vllm_server_port=cfg.vllm_server_port,
+        vllm_server_timeout=cfg.vllm_server_timeout,
+        vllm_gpu_memory_utilization=cfg.vllm_gpu_memory_utilization,
+        vllm_tensor_parallel_size=cfg.vllm_tensor_parallel_size,
     )
 
     callback = JsonlMetricsCallback(cfg.output_dir / "train_log.jsonl")

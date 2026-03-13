@@ -21,6 +21,7 @@
 - base model：4bit 量化加载
 - trainable params：LoRA adapter
 - 不做全量微调
+- rollout backend：`vLLM server`
 
 GRPO 在 Phase 1 的 SFT adapter 上继续训练：
 
@@ -50,33 +51,28 @@ GRPO 在 Phase 1 的 SFT adapter 上继续训练：
 ## 当前实现
 
 - 入口：[train_grpo.py](/home/chy/code/active/rl/scripts/train_grpo.py)
+- vLLM server 入口：[serve_grpo_vllm.py](/home/chy/code/active/rl/scripts/serve_grpo_vllm.py)
 - 配置：[grpo.yaml](/home/chy/code/active/rl/configs/grpo.yaml)
 - GRPO 共享逻辑：[grpo.py](/home/chy/code/active/rl/src/rl/grpo.py)
 
 ## 当前已知风险
 
-当前最主要风险不是 reward，而是模型加载后的 dtype / 量化兼容问题。
+当前最主要风险不是 reward，而是 `TRL 0.24.x` 与当前 `vLLM 0.16.x` 的接口差异，以及真实 GPU 环境中的 server 权重同步稳定性。
 
-真实 GPU 环境已观察到：
+当前实现约束：
 
-```text
-RuntimeError: expected mat1 and mat2 to have the same dtype, but got: float != c10::BFloat16
-```
-
-当前判断：
-
-- `unsloth` 4bit 基座快照自带量化配置
-- 该配置可能覆盖手动指定的 compute dtype
-- HF + PEFT + TRL GRPO 路径中的 dtype 仍未完全统一
+- 基座默认走官方 `Qwen3-1.7B-Base`
+- 不再维护 `unsloth` 的单独训练入口
+- `vLLM` 当前只支持 `server` 模式，不支持 `colocate`
 
 ## reviewer 建议优先检查
 
 - [train_grpo.py](/home/chy/code/active/rl/scripts/train_grpo.py) 中：
   - `quantization_config`
-  - `torch_dtype`
-  - LoRA 参数 dtype 对齐
-- 当前 `unsloth-bnb-4bit` 基座与 SFT adapter 的兼容性
-- 是否需要改用标准 HF base 再挂现有 adapter
+  - `attn_implementation`
+  - `vLLM server` 连接参数
+- `trl` 导入阶段的 `vllm.sampling_params` 兼容
+- `PeftModel` continuation 在 `vLLM` 权重同步后的稳定性
 
 ## 非目标
 

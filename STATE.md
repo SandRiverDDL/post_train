@@ -3,7 +3,7 @@
 ## 当前结论
 
 SFT 阶段的核心阻塞已经解除。
-GRPO 阶段已进入真实调试，但当前仍被模型加载后的 dtype/量化兼容问题阻塞。
+GRPO 阶段已进入真实调试，当前主路径已切换到官方 `Qwen3-1.7B-Base + QLoRA continuation + vLLM server`。
 
 当前最可信的结论是：
 
@@ -105,16 +105,17 @@ GRPO 阶段已进入真实调试，但当前仍被模型加载后的 dtype/量�
 
 1. `MATH500 test` 的正式结果还可以补跑。
 2. 训练集上的 `normalized_accuracy` 仍然不高，说明这版 SFT 更偏向“协议稳定 + 可用 benchmark 提升”，而不是对训练题强记忆。
-3. GRPO 虽然已有最小代码骨架，但在真实 GPU 环境中运行 `scripts/train_grpo.py --config configs/grpo.yaml` 时，仍会在 generation forward 阶段报：
+3. GRPO 最小代码骨架已经收敛到单一路径：
 
-```text
-RuntimeError: expected mat1 and mat2 to have the same dtype, but got: float != c10::BFloat16
-```
+- 官方 `Qwen3-1.7B-Base`
+- `4bit + LoRA adapter continuation`
+- `TRL GRPOTrainer`
+- `vLLM server` rollout
 
 当前判断：
 
-- 这不是 reward、数据字段或 boxed 协议解析问题
-- 主要是 `unsloth` 4bit 基座快照自带量化配置，与当前 HF + PEFT GRPO 路径的计算 dtype 仍未完全统一
+- 主路径不再继续维护 `unsloth` 专用训练入口
+- 当前最优先工作从“继续 patch dtype”切换为“验证 vLLM server 权重同步与 rollout 稳定性”
 - Phase 2 当前最优先工作不是继续改 reward，而是先把 GRPO 训练真实跑通
 
 ## GRPO 调试上下文
