@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import importlib
 from pathlib import Path
 from typing import Any
 
@@ -46,92 +45,93 @@ def build_grpo_record(
     return record
 
 
-def correctness_reward(
+_REWARD_TOKENIZER = None
+_LAST_REWARD_STATS: dict[str, float] = {}
+
+
+def set_reward_tokenizer(tokenizer: Any) -> None:
+    global _REWARD_TOKENIZER
+    _REWARD_TOKENIZER = tokenizer
+
+
+def reward_token_length(completion: str) -> int:
+    cleaned = clean_completion_for_protocol(completion)
+    if _REWARD_TOKENIZER is None:
+        return len(cleaned.split())
+    return len(_REWARD_TOKENIZER(cleaned, add_special_tokens=False)["input_ids"])
+
+
+def _compute_reward_components(completion: str, answer: str) -> tuple[float, dict[str, float]]:
+    result = evaluate_prediction(completion, answer, require_boxed=True)
+    token_count = reward_token_length(completion)
+    length_penalty = -1e-4 * token_count
+    extract_ok = bool(result["extract_ok"])
+    format_ok = bool(result["format_ok"])
+    correct = bool(result["correct"])
+
+    if not extract_ok:
+        base_reward = -0.2
+        wrong = 0.0
+        parse_fail = 1.0
+        format_bonus = 0.0
+        correct_flag = 0.0
+    else:
+        parse_fail = 0.0
+        correct_flag = 1.0 if correct else 0.0
+        wrong = 0.0 if correct else 1.0
+        base_reward = 1.0 if correct else -0.2
+        format_bonus = 0.05 if format_ok else 0.0
+
+    reward = base_reward + format_bonus + length_penalty
+    stats = {
+        "rewards/correct_rate": correct_flag,
+        "rewards/wrong_rate": wrong,
+        "rewards/parse_fail_rate": parse_fail,
+        "rewards/format_rate": 1.0 if format_ok and extract_ok else 0.0,
+        "rewards/mean_length_penalty": length_penalty,
+    }
+    return reward, stats
+
+
+def combined_reward(
     prompts: list[str],
     completions: list[str],
     final_answer: list[str],
     **_: Any,
 ) -> list[float]:
+    global _LAST_REWARD_STATS
     rewards: list[float] = []
+    totals = {
+        "rewards/correct_rate": 0.0,
+        "rewards/wrong_rate": 0.0,
+        "rewards/parse_fail_rate": 0.0,
+        "rewards/format_rate": 0.0,
+        "rewards/mean_length_penalty": 0.0,
+    }
+    count = 0
     for completion, answer in zip(completions, final_answer, strict=True):
-        result = evaluate_prediction(completion, answer, require_boxed=True)
-        rewards.append(1.0 if bool(result["correct"]) else 0.0)
+        reward, stats = _compute_reward_components(completion, answer)
+        rewards.append(reward)
+        for key, value in stats.items():
+            totals[key] += value
+        count += 1
+    if count:
+        _LAST_REWARD_STATS = {key: value / count for key, value in totals.items()}
+    else:
+        _LAST_REWARD_STATS = {}
     return rewards
 
 
-def parse_reward(
-    prompts: list[str],
-    completions: list[str],
-    final_answer: list[str],
-    **_: Any,
-) -> list[float]:
-    rewards: list[float] = []
-    for completion, answer in zip(completions, final_answer, strict=True):
-        result = evaluate_prediction(completion, answer, require_boxed=True)
-        rewards.append(1.0 if bool(result["extract_ok"]) else -1.0)
-    return rewards
-
-
-def format_reward(
-    prompts: list[str],
-    completions: list[str],
-    final_answer: list[str],
-    **_: Any,
-) -> list[float]:
-    rewards: list[float] = []
-    for completion, answer in zip(completions, final_answer, strict=True):
-        result = evaluate_prediction(completion, answer, require_boxed=True)
-        rewards.append(1.0 if bool(result["format_ok"]) else -1.0)
-    return rewards
+def last_reward_stats() -> dict[str, float]:
+    return dict(_LAST_REWARD_STATS)
 
 
 def reward_functions() -> list:
-    return [correctness_reward, parse_reward, format_reward]
+    return [combined_reward]
 
 
 def default_reward_weights() -> list[float]:
-    return [1.0, 0.02, 0.02]
-
-
-def ensure_trl_model_compat(model: Any) -> Any:
-    # `trl==0.24.0` 会直接访问 `warnings_issued` 和 `add_model_tags`。
-    # 在当前 `peft/transformers` 包装模型上，这些属性不一定存在，需要显式补齐。
-    if not hasattr(model, "warnings_issued") or getattr(model, "warnings_issued") is None:
-        model.warnings_issued = {}
-
-    if not hasattr(model, "add_model_tags"):
-        def _add_model_tags(_: Any) -> None:
-            return None
-
-        model.add_model_tags = _add_model_tags
-
-    base_model = getattr(model, "base_model", None)
-    if base_model is not None:
-        if not hasattr(base_model, "warnings_issued") or getattr(base_model, "warnings_issued") is None:
-            base_model.warnings_issued = model.warnings_issued
-        if not hasattr(base_model, "add_model_tags"):
-            base_model.add_model_tags = model.add_model_tags
-
-    return model
-
-
-def ensure_trl_vllm_import_compat(*, use_vllm: bool, vllm_mode: str | None = None) -> bool:
-    try:
-        sampling_params = importlib.import_module("vllm.sampling_params")
-    except ImportError:
-        return False
-
-    if hasattr(sampling_params, "GuidedDecodingParams"):
-        return False
-
-    structured_outputs_cls = getattr(sampling_params, "StructuredOutputsParams", None)
-    if structured_outputs_cls is None:
-        return False
-
-    # `trl==0.24.0` 在导入 `GRPOTrainer` 时会无条件导入旧接口。
-    # 当前 vLLM 版本已将其重命名为 `StructuredOutputsParams`，二者都支持 `regex=` 初始化。
-    sampling_params.GuidedDecodingParams = structured_outputs_cls
-    return True
+    return [1.0]
 
 
 def response_token_length(solution: str, tokenizer) -> int:
@@ -140,14 +140,20 @@ def response_token_length(solution: str, tokenizer) -> int:
 
 
 class JsonlMetricsCallback(TrainerCallback):
-    def __init__(self, output_path: str | Path) -> None:
+    def __init__(self, output_path: str | Path, *, reset: bool = True, wandb_run: Any | None = None) -> None:
         self.output_path = ensure_parent(output_path)
+        self.wandb_run = wandb_run
+        if reset:
+            self.output_path.write_text("", encoding="utf-8")
 
     def on_log(self, args, state, control, logs=None, **kwargs):
         if not logs:
             return
         record = {"step": state.global_step, "epoch": state.epoch}
         record.update(logs)
+        record.update(last_reward_stats())
         with self.output_path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        if self.wandb_run is not None:
+            self.wandb_run.log(record, step=state.global_step)
         return control

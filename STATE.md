@@ -3,7 +3,7 @@
 ## 当前结论
 
 SFT 阶段的核心阻塞已经解除。
-GRPO 阶段已进入真实调试，当前主路径已切换到官方 `Qwen3-1.7B-Base + QLoRA continuation + vLLM server`。
+GRPO 阶段已进入真实调试，当前主路径已切换到 `Unsloth GRPO + 单卡优先`。
 
 当前最可信的结论是：
 
@@ -90,33 +90,37 @@ GRPO 阶段已进入真实调试，当前主路径已切换到官方 `Qwen3-1.7B
 
 ## 当前判断
 
-对进入 GRPO 来说，当前最合理的 SFT 冷启动基线是：
+对当前项目来说，需要区分 `SFT` 和 `GRPO` 两条数据路线：
 
-- NuminaMath
-- 分层抽样
-- `2000` 条
-- `response token length = 64~256`
+- `SFT` 冷启动基线仍然是：
+  - NuminaMath
+  - 分层抽样
+  - `2000` 条
+  - `response token length = 64~256`
+- `GRPO` 主线训练数据已经切到：
+  - `GSM8K train(main)`
+  - full: `2000` 条
+  - tiny: `64` 条
+  - `response token length <= 128`
 
-而不是：
-
-- 原始长解答 `3000` 条全量直接训练
+原因不是 boxed 协议问题，而是 `NuminaMath` 对 `1.7B/4B` 冷启动 policy 来说 reward 过于稀疏。
 
 ## 仍未完成的部分
 
 1. `MATH500 test` 的正式结果还可以补跑。
 2. 训练集上的 `normalized_accuracy` 仍然不高，说明这版 SFT 更偏向“协议稳定 + 可用 benchmark 提升”，而不是对训练题强记忆。
-3. GRPO 最小代码骨架已经收敛到单一路径：
+3. GRPO 主线策略已经改变：
 
-- 官方 `Qwen3-1.7B-Base`
-- `4bit + LoRA adapter continuation`
-- `TRL GRPOTrainer`
-- `vLLM server` rollout
+- `TRL GRPO` 调试代码留在独立分支
+- 主干切到 `Unsloth GRPO`
+- 优先目标是单卡可调试，而不是继续兼容 `TRL + vLLM`
 
 当前判断：
 
-- 主路径不再继续维护 `unsloth` 专用训练入口
-- 当前最优先工作从“继续 patch dtype”切换为“验证 vLLM server 权重同步与 rollout 稳定性”
-- Phase 2 当前最优先工作不是继续改 reward，而是先把 GRPO 训练真实跑通
+- 主干不再继续扩展 `TRL/vLLM` 兼容补丁
+- 当前最优先工作从“修 TRL 路径”切换为“验证 Unsloth GRPO 单卡可运行性”
+- Phase 2 的 reward 主口径已改为单一 `combined_reward`
+- Phase 2 当前最优先工作仍是把 GRPO 训练真实跑通
 
 ## GRPO 调试上下文
 
@@ -132,70 +136,58 @@ GRPO 阶段已进入真实调试，当前主路径已切换到官方 `Qwen3-1.7B
 
 目前已经确认：
 
-- GRPO 不再卡在脚本入口或 `GRPOConfig` 初始化
-- `trl/peft` 的 `warnings_issued` / `add_model_tags` 兼容问题已修复
-- `BitsAndBytesConfig` 导入错误已修复
-- `bf16/use_cpu` 初始化校验已修复
-- 代码在受限环境里已经可以推进到 `trainer.train()`，不再是启动即崩
+- 数据准备、prompt、reward contract、训练日志落盘都已经具备
+- `TRL` 路径的排障结论已经保存在独立分支
+- 主干训练入口已经切换为 `Unsloth GRPO`
 
 ### 当前真实阻塞
 
-在用户的真实 GPU 环境中，`train_grpo.py` 仍稳定报同一类错误：
+当前阻塞已经从 `TRL/vLLM` 兼容问题切换为：
 
-```text
-RuntimeError: expected mat1 and mat2 to have the same dtype, but got: float != c10::BFloat16
-```
+- `Unsloth GRPO` 在单卡真实 GPU 环境中的初始化与前几个 step 是否稳定
+- 当前 `outputs/sft-qwen3-1.7b` 冷启动 adapter 是否能直接作为 `Unsloth GRPO` 的继续训练输入
+- 跑通后日志、reward、配置快照是否仍符合现有工程约定
 
-错误栈稳定落在：
+当前新增的调试策略：
 
-- `peft/tuners/lora/layer.py`
-- `result = self.base_layer(x, *args, **kwargs)`
-- 上层对应 `Qwen3` 的 `gate_proj/down_proj`
-
-这说明报错发生在：
-
-- generation forward
-- LoRA 包装层进入 base linear 之前
-- 不是 reward 函数，不是答案解析，不是数据字段缺失
+- 保留完整配置 `configs/grpo.yaml`
+- 额外提供单卡调试配置 `configs/grpo_tiny.yaml`
+- GRPO 训练数据从 `NuminaMath` 切到 `GSM8K train(main)`，以降低 `1.7B` 上的 reward 稀疏问题
+- full / tiny 都通过 `prepare_grpo_data.py` 生成独立的 `gsm8k` GRPO 工件
+- 当前主配置的 loss 已从 `dapo` 切到 `dr_grpo`
+- reward 已从 `correctness + parse + format` 三路加权，收敛为单一组合 reward：
+  - `correct: +1.0`
+  - `wrong: -0.2`
+  - `parse fail: -0.2`
+  - `format: +0.05`
+  - `length: -1e-4 * cleaned_completion_tokens`
+- GRPO 训练监控已支持可选 `wandb offline`，同时保留 `train_log.jsonl` 作为本地审计日志
 
 ### 已知环境与关键事实
 
-- 基座模型：
-  - `unsloth/Qwen3-1.7B-Base-unsloth-bnb-4bit`
-- 当前 cold start adapter：
+- 当前 SFT 冷启动产物仍是：
   - `outputs/sft-qwen3-1.7b`
-- `adapter_config.json` 显示：
-  - `auto_mapping.parent_library = transformers.models.qwen3.modeling_qwen3`
-  - `unsloth_fixed = true`
-- 当前 SFT adapter 中可训练 LoRA 参数实际是 `torch.float32`
-- 当前 GRPO 路径为了规避前一轮错误，已经尝试：
-  - 显式传 `quantization_config`
-  - 显式传 `torch_dtype`
-  - `autocast_adapter_dtype=False`
-  - 将 `requires_grad=True` 的参数强制转到推断的 `compute_dtype`
-
-但根据真实报错看，这些改动仍没有让整条计算路径完全统一 dtype。
+- 该 adapter 的 `base_model_name_or_path` 指向：
+  - `unsloth/Qwen3-1.7B-Base-unsloth-bnb-4bit` 本地 snapshot
+- 因此主干切回 `Unsloth` 路线后，冷启动资产与基座重新对齐
+- 当前主线目标是单卡可调试，不再优先维护 `TRL + vLLM` 标准生态兼容
 
 ### 需要 reviewer 理解的判断
 
-当前最重要的判断不是“reward 有没有问题”，而是：
+当前最重要的判断不是“是否继续救 `TRL` 路径”，而是：
 
-1. 这个 `unsloth-bnb-4bit` 基座快照是否会用自带 `quantization_config` 覆盖我们手动设置的 compute dtype
-2. 当前 SFT adapter 是否适合直接挂到这条 HF 4bit GRPO 路径上继续训练
-3. 是否应该放弃继续和这个 `unsloth` 量化快照硬兼容，改成：
-   - 切换到标准 HF Qwen3 base
-   - 自己完全控制 `BitsAndBytesConfig`
-   - 再挂现有 LoRA adapter
+1. `Unsloth GRPO` 是否能在单卡上稳定替代当前主线
+2. 当前 SFT adapter 是否能直接继续训练，而不需要重新做 cold start
+3. 主干是否能只保留一套 `Unsloth GRPO` 实现，而把 `TRL` 完全留在分支中
 
 ### reviewer 建议优先检查
 
 - [scripts/train_grpo.py](/home/chy/code/active/rl/scripts/train_grpo.py)
-  - `load_model_and_tokenizer()` 中的 `quantization_config`
-  - `torch_dtype`
-  - LoRA 参数 dtype 对齐逻辑
-- 当前基座模型快照和 SFT adapter 的兼容性
-- 是否需要在 GRPO 路径显式调用 `prepare_model_for_kbit_training`
-- 是否应直接更换 GRPO 基座加载策略，而不是继续 patch 当前 `unsloth-bnb-4bit` 快照
+  - `PatchFastRL("GRPO")`
+  - 当前 SFT adapter 的加载路径
+  - `Unsloth` 单卡参数设置
+- 当前 `outputs/sft-qwen3-1.7b` 和 `unsloth` 基座的兼容性
+- 跑通后的日志与工件是否仍符合现有 Phase 2 约定
 
 ## 对下一阶段的影响
 
@@ -205,7 +197,7 @@ Phase 2 不应再把“如何学会 boxed 协议”当成主问题。
 
 1. boxed 协议已由 `2k short response` 这条 SFT 基线提供
 2. 重点转向：
-   - 模型加载与量化/精度兼容
+   - 单卡训练可运行性
    - reward 设计
    - rollout 稳定性
    - base vs SFT vs GRPO 的对照

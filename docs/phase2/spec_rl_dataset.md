@@ -6,13 +6,14 @@
 
 ## 默认数据源
 
-- `nlile/NuminaMath-1.5-RL-Verifiable`
+- `openai/gsm8k` `train(main)`
 
-当前不在 v1 整体更换主数据集。
+当前 GRPO 主线不再默认使用 `NuminaMath`，因为对 `1.7B/4B` 冷启动 policy 来说，reward 过于稀疏。
 
 ## 冻结工件
 
-- `data/grpo/train_grpo_2k_short.jsonl`
+- `data/grpo/train_grpo_gsm8k_2k_short.jsonl`
+- `data/grpo/train_grpo_gsm8k_tiny_short.jsonl`（单卡调试工件）
 
 GRPO 不直接复用 SFT 工件路径。
 
@@ -21,10 +22,17 @@ GRPO 不直接复用 SFT 工件路径。
 默认规则：
 
 - 总量：`2000`
-- 按 `problem_type` 分层采样
-- `response token length = 64~256`
+- 随机采样
+- `response token length <= 128`
 - `final_answer` 可稳定抽取
 - 可映射到 boxed 协议
+
+tiny 调试规则：
+
+- 总量：`64`
+- 随机采样
+- `response token length <= 128`
+- 仅用于快速验证 reward 与 rollout 是否工作
 
 ## 字段约定
 
@@ -36,8 +44,8 @@ GRPO 不直接复用 SFT 工件路径。
   "question": "...",
   "prompt": "...",
   "final_answer": "...",
-  "source": "numinamath",
-  "problem_type": "Algebra"
+  "source": "gsm8k",
+  "problem_type": "Arithmetic"
 }
 ```
 
@@ -49,8 +57,8 @@ GRPO 不直接复用 SFT 工件路径。
 ## 原则
 
 - 优先短 response，降低 rollout 难度
-- 保留分层采样，避免 2k 全偏到单一题型
-- 不把原始长解答全量直接拿来做 GRPO 训练输入
+- 优先选择 reward 更密集、答案更短的题源
+- 主线优先保证 `1.7B` 单卡可训练，而不是追求更难数学题覆盖
 
 ## 当前实现
 

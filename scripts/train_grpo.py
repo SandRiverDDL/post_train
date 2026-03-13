@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
-
-import torch
+from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,15 +19,14 @@ from rl.grpo import (
     build_grpo_dataset,
     build_grpo_prompt,
     default_reward_weights,
-    ensure_trl_model_compat,
-    ensure_trl_vllm_import_compat,
     reward_functions,
+    set_reward_tokenizer,
 )
 from rl.io import ensure_parent, read_jsonl
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="运行 Qwen3 GRPO。")
+    parser = argparse.ArgumentParser(description="运行 Unsloth GRPO。")
     parser.add_argument("--config", default="configs/grpo.yaml", help="配置文件路径")
     return parser.parse_args()
 
@@ -36,38 +36,50 @@ def _looks_like_adapter_dir(path: str | Path) -> bool:
     return candidate.is_dir() and (candidate / "adapter_config.json").exists()
 
 
-def load_model_and_tokenizer(cfg):
-    from peft import PeftModel
-    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+def resolve_training_model_name(cfg) -> str:
+    if _looks_like_adapter_dir(cfg.cold_start_model):
+        return str(cfg.cold_start_model)
+    return str(cfg.base_model_name)
 
-    tokenizer = AutoTokenizer.from_pretrained(cfg.base_model_name, trust_remote_code=True)
-    tokenizer.padding_side = "left"
+
+def load_model_and_tokenizer(cfg):
+    import unsloth  # noqa: F401
+    from unsloth import FastLanguageModel, PatchFastRL, is_bfloat16_supported
+
+    PatchFastRL("GRPO", FastLanguageModel)
+    from trl import GRPOConfig, GRPOTrainer
+
+    model_name = resolve_training_model_name(cfg)
+    load_kwargs = {
+        "model_name": model_name,
+        "max_seq_length": cfg.max_seq_length,
+        "load_in_4bit": cfg.load_in_4bit,
+        "fast_inference": cfg.fast_inference,
+        "max_lora_rank": cfg.lora_rank,
+    }
+    if cfg.fast_inference:
+        load_kwargs["gpu_memory_utilization"] = cfg.gpu_memory_utilization
+
+    model, tokenizer = FastLanguageModel.from_pretrained(**load_kwargs)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"
 
-    compute_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
-    quantization_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_compute_dtype=compute_dtype,
-    )
-    model_kwargs = {
-        "trust_remote_code": True,
-        "quantization_config": quantization_config,
-        "dtype": compute_dtype,
-        "device_map": "auto",
-        "low_cpu_mem_usage": True,
-        "attn_implementation": cfg.attn_implementation,
-    }
-    model = AutoModelForCausalLM.from_pretrained(cfg.base_model_name, **model_kwargs)
-    if _looks_like_adapter_dir(cfg.cold_start_model):
-        model = PeftModel.from_pretrained(
+    if not _looks_like_adapter_dir(cfg.cold_start_model):
+        model = FastLanguageModel.get_peft_model(
             model,
-            str(cfg.cold_start_model),
-            is_trainable=True,
+            r=cfg.lora_rank,
+            lora_alpha=cfg.lora_alpha,
+            lora_dropout=cfg.lora_dropout,
+            bias="none",
+            use_gradient_checkpointing="unsloth",
+            random_state=cfg.seed,
         )
-    if getattr(model, "config", None) is not None:
-        model.config.use_cache = False
-    return ensure_trl_model_compat(model), tokenizer
+
+    if hasattr(model, "for_training"):
+        model.for_training(use_gradient_checkpointing=True)
+
+    return model, tokenizer, GRPOConfig, GRPOTrainer, is_bfloat16_supported
 
 
 def preview_samples(dataset_path: Path) -> None:
@@ -83,31 +95,39 @@ def preview_samples(dataset_path: Path) -> None:
         print(row["final_answer"])
 
 
-def resolve_precision_flags(cfg) -> tuple[bool, bool, bool]:
-    has_cuda = torch.cuda.is_available()
-    use_bf16 = bool(cfg.bf16) if cfg.bf16 is not None else False
-    use_fp16 = bool(cfg.fp16) if cfg.fp16 is not None else False
-    if not has_cuda:
-        use_bf16 = False
-        use_fp16 = False
+def init_wandb(cfg) -> Any | None:
+    if cfg.report_to == "none":
+        return None
+    if cfg.report_to != "wandb":
+        raise ValueError(f"不支持的 report_to: {cfg.report_to}")
+    if importlib.util.find_spec("wandb") is None:
+        raise RuntimeError(
+            "当前配置启用了 wandb，但环境里没有安装 wandb。"
+            "请先安装 wandb，或把 report_to 改为 none。"
+        )
+    os.environ.setdefault("WANDB_MODE", cfg.wandb_mode)
+    import wandb
 
-    return use_bf16, use_fp16, not has_cuda
+    run_name = cfg.wandb_run_name or cfg.output_dir.name
+    return wandb.init(
+        project=cfg.wandb_project,
+        name=run_name,
+        tags=cfg.wandb_tags,
+        dir=str(cfg.output_dir),
+        config=cfg.model_dump(mode="json"),
+    )
 
 
 def main() -> None:
     args = parse_args()
     cfg = load_grpo_config(args.config)
     preview_samples(cfg.train_dataset)
-    compat_applied = ensure_trl_vllm_import_compat(use_vllm=cfg.use_vllm, vllm_mode=cfg.vllm_mode)
-    if compat_applied:
-        print("[grpo] 已为当前 trl/vLLM 组合应用 server 模式导入兼容。")
+    wandb_run = init_wandb(cfg)
 
-    from trl import GRPOConfig, GRPOTrainer
-
-    model, tokenizer = load_model_and_tokenizer(cfg)
+    model, tokenizer, GRPOConfig, GRPOTrainer, is_bfloat16_supported = load_model_and_tokenizer(cfg)
     train_dataset = build_grpo_dataset(cfg.train_dataset)
+    set_reward_tokenizer(tokenizer)
     reward_funcs = reward_functions()
-    use_bf16, use_fp16, use_cpu = resolve_precision_flags(cfg)
 
     training_args = GRPOConfig(
         output_dir=str(cfg.output_dir),
@@ -117,9 +137,8 @@ def main() -> None:
         num_train_epochs=cfg.epochs,
         warmup_ratio=cfg.warmup_ratio,
         weight_decay=cfg.weight_decay,
-        bf16=use_bf16,
-        fp16=use_fp16,
-        use_cpu=use_cpu,
+        bf16=is_bfloat16_supported(),
+        fp16=not is_bfloat16_supported(),
         max_prompt_length=cfg.max_prompt_length,
         max_completion_length=cfg.max_completion_length,
         num_generations=cfg.num_generations,
@@ -141,17 +160,9 @@ def main() -> None:
         log_completions=cfg.log_completions,
         num_completions_to_print=cfg.num_completions_to_print,
         reward_weights=default_reward_weights(),
-        use_vllm=cfg.use_vllm,
-        vllm_mode=cfg.vllm_mode,
-        vllm_server_base_url=cfg.vllm_server_base_url,
-        vllm_server_host=cfg.vllm_server_host,
-        vllm_server_port=cfg.vllm_server_port,
-        vllm_server_timeout=cfg.vllm_server_timeout,
-        vllm_gpu_memory_utilization=cfg.vllm_gpu_memory_utilization,
-        vllm_tensor_parallel_size=cfg.vllm_tensor_parallel_size,
     )
 
-    callback = JsonlMetricsCallback(cfg.output_dir / "train_log.jsonl")
+    callback = JsonlMetricsCallback(cfg.output_dir / "train_log.jsonl", wandb_run=wandb_run)
     trainer = GRPOTrainer(
         model=model,
         reward_funcs=reward_funcs,
@@ -173,16 +184,26 @@ def main() -> None:
     with metrics_snapshot.open("w", encoding="utf-8") as fh:
         json.dump(
             {
-                "reward_functions": ["correctness_reward", "parse_reward", "format_reward"],
+                "reward_functions": ["combined_reward"],
                 "reward_weights": default_reward_weights(),
+                "reward_formula": {
+                    "correct": 1.0,
+                    "wrong": -0.2,
+                    "format": 0.05,
+                    "length": "-1e-4 * cleaned_completion_tokens",
+                    "parse_fail": -0.2,
+                },
                 "loss_type": cfg.loss_type,
                 "mask_truncated_completions": cfg.mask_truncated_completions,
                 "top_entropy_quantile": cfg.top_entropy_quantile,
+                "report_to": cfg.report_to,
             },
             fh,
             ensure_ascii=False,
             indent=2,
         )
+    if wandb_run is not None:
+        wandb_run.finish()
 
 
 if __name__ == "__main__":

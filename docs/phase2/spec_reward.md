@@ -6,38 +6,36 @@
 
 ## 默认 reward 组合
 
-- `correctness_reward`
-- `parse_reward`
-- `format_reward`
+当前主线使用**单一组合 reward**：
+
+- `combined_reward`
 
 ## 默认权重
 
-- `correct = 1.0`
-- `parse = 0.02`
-- `format = 0.02`
+- `combined_reward = 1.0`
 
 ## 语义
 
-### correctness
+### combined reward
 
-- 预测答案与标准答案一致：`1.0`
-- 否则：`0.0`
+- 正确且可解析：基础分 `+1.0`
+- 可解析但答案错误：基础分 `-0.2`
+- 解析失败：基础分 `-0.2`
+- 满足 strict `Final answer: \boxed{...}`：额外 `+0.05`
+- 长度惩罚：`-1e-4 * cleaned_completion_tokens`
 
-### parse
+语义约束：
 
-- 能按 boxed 协议提取答案：正辅助项
-- 否则：负辅助项
-
-### format
-
-- 满足 strict `Final answer: \boxed{...}`：正辅助项
-- 否则：负辅助项
+- `wrong` 与 `parse fail` 互斥
+- `format` 可与 `correct` 或 `wrong` 叠加
+- `parse fail` 不再叠加 `format`
 
 ## 设计原则
 
-- 正确性是主信号
-- parse / format 只做轻量 shaping
-- 不在 v1 引入过程奖励、风格奖励、长度奖励
+- 正确性仍是主信号
+- `format` 只做轻量 shaping
+- `length` 只做轻微线性惩罚，不替代 `max_completion_length`
+- 不在 v1 引入过程奖励或风格奖励
 
 ## 解析逻辑
 
@@ -49,11 +47,15 @@
 
 - reward functions：[grpo.py](/home/chy/code/active/rl/src/rl/grpo.py)
 
-## 后续扩展位
+## 当前日志诊断项
 
-- reward mix strategy
-- truncation policy
-- 更复杂的 verifier shaping
+训练日志额外记录以下诊断指标：
+
+- `rewards/correct_rate`
+- `rewards/wrong_rate`
+- `rewards/parse_fail_rate`
+- `rewards/format_rate`
+- `rewards/mean_length_penalty`
 
 ## 非目标
 
