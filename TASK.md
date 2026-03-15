@@ -32,4 +32,6 @@
 - [ ] 在单卡真实 GPU 环境验证 `Unsloth GRPO` 至少稳定跑过前几个训练 step
 - [ ] 确认 `outputs/sft-qwen3-1.7b` 冷启动路径在 `Unsloth GRPO` 下可继续训练
 - [ ] 验证切换到 `GSM8K train` 后，GRPO reward 稀疏问题是否明显缓解
+- [ ] 用 `vLLM` 给 `GSM8K short` 候选集做离线难度打分，并产出可复用的 scored 工件
+- [ ] 从 scored 工件中筛出 `1K` 中等难度训练集，验证是否优于当前 `0.5K` 随机 short 子集
 - [ ] GRPO 跑通后，再补 Phase 2 对照：`base vs SFT vs GRPO`

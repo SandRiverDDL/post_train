@@ -135,7 +135,7 @@ class GRPOUtilsTest(unittest.TestCase):
         self.assertEqual(cfg.num_generations, 2)
         self.assertEqual(cfg.gradient_accumulation_steps, 4)
         self.assertEqual(cfg.logging_steps, 1)
-        self.assertEqual(cfg.report_to, "none")
+        self.assertEqual(cfg.report_to, "wandb")
 
     def test_infer_source_detects_gsm8k(self) -> None:
         self.assertEqual(infer_source("openai/gsm8k", "auto"), "gsm8k")

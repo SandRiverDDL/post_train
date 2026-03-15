@@ -63,6 +63,26 @@ tiny 调试规则：
 ## 当前实现
 
 - 数据准备入口：[prepare_grpo_data.py](/home/chy/code/active/rl/scripts/prepare_grpo_data.py)
+- 离线打分入口：[score_grpo_candidates.py](/home/chy/code/active/rl/scripts/score_grpo_candidates.py)
+- 训练子集选择入口：[select_grpo_scored_subset.py](/home/chy/code/active/rl/scripts/select_grpo_scored_subset.py)
+
+## 中等难度筛选
+
+当 `GSM8K short` 候选集较大时，GRPO 主线优先使用经 `SFT` policy 离线打分后的中等难度子集，而不是直接随机抽样。
+
+当前默认打分规则：
+
+- 后端：`vLLM`
+- 每题采样：`4` 次
+- 采样参数：`temperature=0.8`，`top_p=0.95`
+- 判分协议：strict boxed
+
+当前默认筛选规则：
+
+- `0.25 <= correct_rate <= 0.50`
+- `parse_rate >= 0.50`
+
+打分结果应先全量持久化为 scored 工件，再由独立脚本生成 `1K` 或其他规模的训练子集。
 
 ## 非目标
 

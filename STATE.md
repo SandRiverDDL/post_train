@@ -171,6 +171,10 @@ GRPO 阶段已进入真实调试，当前主路径已切换到 `Unsloth GRPO + �
   - `unsloth/Qwen3-1.7B-Base-unsloth-bnb-4bit` 本地 snapshot
 - 因此主干切回 `Unsloth` 路线后，冷启动资产与基座重新对齐
 - 当前主线目标是单卡可调试，不再优先维护 `TRL + vLLM` 标准生态兼容
+- 当前新增的数据筛选方向是：
+  - 用 `vLLM` 对 `GSM8K short` 候选集做离线多次采样打分
+  - 以 `correct_rate` 和 `parse_rate` 选择更适合 `1.7B` RL 的中等难度题
+  - 打分结果全量持久化，后续抽样和控量走独立脚本，而不是重复采样
 
 ### 需要 reviewer 理解的判断
 

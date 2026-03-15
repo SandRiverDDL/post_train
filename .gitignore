@@ -19,11 +19,7 @@ tmp/
 *.err
 
 # 本地数据工件
-data/train_*.jsonl
-data/grpo_*.jsonl
-data/*tiny_overfit*.jsonl
-data/*short*.jsonl
-
+data/
 # 保留冻结评测工件
 !data/eval/
 !data/eval/*.jsonl
@@ -37,3 +33,4 @@ data/*short*.jsonl
 .vscode/
 
 unsloth_compiled_cache/
+pictures

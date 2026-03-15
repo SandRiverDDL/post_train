@@ -23,4 +23,4 @@ weight_decay: 0.01
 eval_max_new_tokens: 512
 eval_backend: vllm
 eval_attn_implementation: sdpa
-eval_gpu_memory_utilization: 0.8
+eval_gpu_memory_utilization: 0.7

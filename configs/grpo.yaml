@@ -1,23 +1,23 @@
 base_model_name: /home/chy/.cache/huggingface/hub/models--unsloth--Qwen3-1.7B-Base-unsloth-bnb-4bit/snapshots/c7079ee9a92d69fbe9e6616dea1888bf0fb0bbca
 cold_start_model: outputs/sft-qwen3-1.7b
-train_dataset: data/grpo/train_grpo_gsm8k_05k_short.jsonl
+train_dataset: data/grpo/train_grpo_gsm8k_1k_middiff.jsonl
 output_dir: outputs/grpo-qwen3-1.7b
 seed: 42
 
 max_seq_length: 1024
 max_prompt_length: 256
-max_completion_length: 256
+max_completion_length: 384
 
 learning_rate: 1.0e-6
 epochs: 1
-batch_size: 8
+batch_size: 16
 gradient_accumulation_steps: 1
 lora_rank: 8
 lora_alpha: 16
 lora_dropout: 0.0
 load_in_4bit: true
 fast_inference: false
-gpu_memory_utilization: 0.5
+gpu_memory_utilization: 0.7
 warmup_ratio: 0.03
 weight_decay: 0.0
 
@@ -25,8 +25,8 @@ num_generations: 4
 num_iterations: 1
 beta: 0.0
 loss_type: dr_grpo
-temperature: 1.0
-top_p: 1.0
+temperature: 0.7
+top_p: 0.95
 top_k:
 min_p:
 repetition_penalty: 1.0

@@ -1,122 +1,164 @@
 ---
 name: bug-hunter
-description: 当需要定位或修复 BUG 时使用。适用于调试 ML/LLM pipeline、训练错误、evaluation 错误或实现与设计不一致的问题。
+description: 当系统行为异常、程序报错或结果不符合预期时使用。用于定位并修复影响系统正确性的 BUG。
 ---
 
-# Bug Hunter：BUG 定位与修复
+# Bug Hunter：系统 BUG 定位与最小修复
 
 ## 目标
 
-定位并修复影响系统正确性的 BUG。
+定位并修复影响系统**正确性**的问题。
 
 优先级：
 
-1. pipeline 正确性
-2. 算法正确性
-3. evaluation 正确性
+1. 系统行为正确性
+2. 算法或逻辑正确性
+3. 数据处理正确性
+4. evaluation / metric 正确性
 
 
 避免：
 
 - 代码风格审查
-- 不必要的重构
-- 架构重设计
+- 不必要重构
+- 架构 redesign
+- 大规模代码修改
+
+
+本 skill 的核心目标是：
+
+**Root Cause Analysis + Minimal Fix**
+
+而不是全面代码审查。
 
 
 ---
 
-# Step 1 — 理解系统
+# 调试原则
 
-如果尚未理解项目，先使用 `repo-orientation` skill。
+1. **Evidence First**
 
-确保理解：
+不要猜测问题。
 
-- 当前 Phase
-- 系统 pipeline
-- 当前任务
+所有结论必须基于：
 
-
----
-
-# Step 2 — 检查 Pipeline
-
-检查 pipeline 是否正确连接：
+- 代码
+- 日志
+- stack trace
+- 数据
+- 运行结果
 
 
-dataset
-→ tokenizer
-→ rollout
-→ reward
-→ trainer
-→ evaluation
-
-
-重点检查：
-
-- 数据格式
-- tensor / token shape
-- batch size
-- sequence length
-- 模块连接
-
-
-常见问题：
-
-- tokenizer 使用错误
-- sequence 被截断
-- parser 使用错误
-- dataset split 错误
-
-
----
-
-# Step 3 — 检查算法逻辑
-
-验证关键算法实现。
+2. **区分直接原因与根本原因**
 
 示例：
 
-RL 训练：
+直接原因：
 
-- rollout 数量正确
-- reward 计算正确
-- loss 公式正确
-
-训练流程：
-
-- gradient 正常更新
-- optimizer step 生效
-- 模型参数发生变化
+evaluation accuracy 为 0
 
 
----
+根本原因：
 
-# Step 4 — 检查 Evaluation
-
-Evaluation 是常见 BUG 来源。
-
-检查：
-
-- evaluation dataset
-- answer parser
-- metric 计算
-- 与 reward 逻辑一致
+answer parser 与 evaluation parser 不一致
 
 
-示例问题：
+
+3. **最小修改原则**
+
+只修改解决问题所必需的代码。
+
+避免：
+
+- 重构模块
+- 改变系统结构
+- 修改无关代码
 
 
-reward parser ≠ evaluation parser
+4. **Patch 触发条件**
 
+只有在满足以下条件时才直接提供 patch：
 
-这会导致训练信号错误。
+- Root Cause 已确认
+- 修复范围局部
+- 修改风险低
+- 不涉及架构调整
+
+否则仅提供 Fix Proposal。
 
 
 ---
 
-# Step 5 — Root Cause 分析
+# Step 1 — 理解问题
 
-分析：
+收集以下信息：
+
+- 期望行为
+- 实际行为
+- 错误信息 / 异常日志
+- 最近代码改动
+- 相关模块
+
+
+如果项目结构尚未理解：
+
+使用 `repo-orientation` skill。
+
+
+---
+
+# Step 2 — 定位问题范围
+
+确定问题发生的位置：
+
+常见层级：
+
+
+输入数据
+↓
+数据处理
+↓
+核心逻辑
+↓
+模型 / 算法
+↓
+输出处理
+↓
+evaluation / metric
+
+
+确定异常发生在哪一层。
+
+
+---
+
+# Step 3 — 证据收集
+
+寻找能够解释问题的证据：
+
+可能来源：
+
+- stack trace
+- logging
+- 中间变量
+- tensor / data shape
+- 配置参数
+- 数据格式
+
+
+重点验证：
+
+- 输入数据是否正确
+- 模块接口是否匹配
+- 参数是否正确传递
+- 中间状态是否合理
+
+
+---
+
+# Step 4 — Root Cause 分析
+
+建立完整因果链：
 
 
 问题现象
@@ -124,18 +166,26 @@ reward parser ≠ evaluation parser
 → 根本原因
 
 
-不要只描述表面现象。
+确保：
+
+- 根本原因能够解释全部异常
+- 不只是表面问题
 
 
 ---
 
-# Step 6 — 最小修复
+# Step 5 — 最小修复方案
 
-修复原则：
+提出修复方案：
 
-- 最小修改
-- 不改变架构
-- 修复根本原因
+要求：
+
+- 修改范围最小
+- 不影响无关模块
+- 不改变系统架构
+
+
+若可安全修复，可提供 patch。
 
 
 ---
@@ -149,14 +199,22 @@ Issue 1
 Problem:
 ...
 
+Evidence:
+...
+
+Direct Cause:
+...
+
 Root Cause:
 ...
 
-Fix:
+Fix Proposal:
 ...
+
+Risk:
+...
+
 
 Issue 2
+
 ...
-
-
-必要时提供 patch。
