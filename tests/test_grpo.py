@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from rl.config import GRPOTrainConfig, load_grpo_config
+from rl.config import GRPOTrainConfig, load_eval_config, load_grpo_config
 from rl.grpo import (
     JsonlMetricsCallback,
     build_grpo_prompt,
@@ -18,6 +18,7 @@ from rl.grpo import (
     combined_reward,
     default_reward_weights,
     last_reward_stats,
+    set_reward_config,
     set_reward_tokenizer,
 )
 from prepare_grpo_data import build_train_record, infer_source
@@ -53,16 +54,27 @@ class GRPOUtilsTest(unittest.TestCase):
                 return {"input_ids": text.split()}
 
         set_reward_tokenizer(DummyTokenizer())
+        set_reward_config(
+            correct=1.0,
+            wrong=-0.2,
+            parse_fail=-0.2,
+            strict_boxed_bonus=0.02,
+            length_coef=1e-4,
+            use_relaxed_correctness=True,
+        )
         completions = [
             "Reasoning\n\nFinal answer: \\boxed{4}",
             "Reasoning only",
         ]
         answers = ["4", "4"]
         rewards = combined_reward([], completions, answers)
-        self.assertAlmostEqual(rewards[0], 1.0496, places=4)
+        self.assertAlmostEqual(rewards[0], 1.0196, places=4)
         self.assertAlmostEqual(rewards[1], -0.2002, places=4)
         stats = last_reward_stats()
         self.assertEqual(stats["rewards/correct_rate"], 0.5)
+        self.assertEqual(stats["rewards/relaxed_correct_rate"], 0.5)
+        self.assertEqual(stats["rewards/strict_correct_rate"], 0.5)
+        self.assertEqual(stats["rewards/strict_boxed_rate"], 0.5)
         self.assertEqual(stats["rewards/parse_fail_rate"], 0.5)
         self.assertEqual(stats["rewards/format_rate"], 0.5)
         self.assertEqual(stats["rewards/wrong_rate"], 0.0)
@@ -76,13 +88,82 @@ class GRPOUtilsTest(unittest.TestCase):
                 return {"input_ids": text.split()}
 
         set_reward_tokenizer(DummyTokenizer())
+        set_reward_config(
+            correct=1.0,
+            wrong=-0.2,
+            parse_fail=-0.2,
+            strict_boxed_bonus=0.02,
+            length_coef=1e-4,
+            use_relaxed_correctness=True,
+        )
         rewards = combined_reward([], ["Try\n\nFinal answer: \\boxed{5}"], ["4"])
-        self.assertAlmostEqual(rewards[0], -0.1504, places=4)
+        self.assertAlmostEqual(rewards[0], -0.1804, places=4)
         stats = last_reward_stats()
         self.assertEqual(stats["rewards/correct_rate"], 0.0)
+        self.assertEqual(stats["rewards/relaxed_correct_rate"], 0.0)
+        self.assertEqual(stats["rewards/strict_correct_rate"], 0.0)
         self.assertEqual(stats["rewards/wrong_rate"], 1.0)
         self.assertEqual(stats["rewards/parse_fail_rate"], 0.0)
         self.assertEqual(stats["rewards/format_rate"], 1.0)
+        self.assertEqual(stats["rewards/strict_boxed_rate"], 1.0)
+
+    def test_combined_reward_relaxed_correct_gets_small_boxed_bonus(self) -> None:
+        class DummyTokenizer:
+            def __call__(self, text, add_special_tokens=False):
+                return {"input_ids": text.split()}
+
+        set_reward_tokenizer(DummyTokenizer())
+        set_reward_config(
+            correct=1.0,
+            wrong=-0.2,
+            parse_fail=-0.2,
+            strict_boxed_bonus=0.02,
+            length_coef=1e-4,
+            use_relaxed_correctness=True,
+        )
+        rewards = combined_reward([], ["The answer is 4"], ["4"])
+        self.assertAlmostEqual(rewards[0], 0.9996, places=4)
+        stats = last_reward_stats()
+        self.assertEqual(stats["rewards/relaxed_correct_rate"], 1.0)
+        self.assertEqual(stats["rewards/strict_correct_rate"], 0.0)
+        self.assertEqual(stats["rewards/strict_boxed_rate"], 0.0)
+
+    def test_combined_reward_can_use_strict_correctness(self) -> None:
+        class DummyTokenizer:
+            def __call__(self, text, add_special_tokens=False):
+                return {"input_ids": text.split()}
+
+        set_reward_tokenizer(DummyTokenizer())
+        set_reward_config(
+            correct=1.0,
+            wrong=-0.2,
+            parse_fail=-0.2,
+            strict_boxed_bonus=0.02,
+            length_coef=1e-4,
+            use_relaxed_correctness=False,
+        )
+        rewards = combined_reward([], ["The answer is 4"], ["4"])
+        self.assertAlmostEqual(rewards[0], -0.2004, places=4)
+        stats = last_reward_stats()
+        self.assertEqual(stats["rewards/relaxed_correct_rate"], 1.0)
+        self.assertEqual(stats["rewards/strict_correct_rate"], 0.0)
+
+    def test_combined_reward_can_disable_format_and_length_rewards(self) -> None:
+        class DummyTokenizer:
+            def __call__(self, text, add_special_tokens=False):
+                return {"input_ids": text.split()}
+
+        set_reward_tokenizer(DummyTokenizer())
+        set_reward_config(
+            correct=1.0,
+            wrong=-0.2,
+            parse_fail=-0.2,
+            strict_boxed_bonus=0.0,
+            length_coef=0.0,
+            use_relaxed_correctness=True,
+        )
+        rewards = combined_reward([], ["Reasoning\n\nFinal answer: \\boxed{4}"], ["4"])
+        self.assertAlmostEqual(rewards[0], 1.0, places=4)
 
     def test_grpo_config_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -94,13 +175,23 @@ class GRPOUtilsTest(unittest.TestCase):
         self.assertEqual(cfg.loss_type, "dapo")
         self.assertEqual(cfg.temperature, 1.0)
         self.assertEqual(cfg.top_p, 1.0)
+        self.assertEqual(cfg.reward_correct, 1.0)
+        self.assertEqual(cfg.reward_wrong, -0.2)
+        self.assertEqual(cfg.reward_parse_fail, -0.2)
+        self.assertEqual(cfg.reward_strict_boxed_bonus, 0.02)
+        self.assertEqual(cfg.reward_length_coef, 1.0e-4)
+        self.assertTrue(cfg.reward_use_relaxed_correctness)
         self.assertEqual(cfg.generation_kwargs, {})
         self.assertTrue(cfg.mask_truncated_completions)
+        self.assertEqual(cfg.max_steps, -1)
         self.assertEqual(cfg.max_completion_length, 384)
         self.assertEqual(cfg.lora_rank, 16)
         self.assertEqual(cfg.lora_alpha, 32)
         self.assertTrue(cfg.load_in_4bit)
         self.assertFalse(cfg.fast_inference)
+        self.assertEqual(cfg.save_strategy, "epoch")
+        self.assertEqual(cfg.save_steps, 50)
+        self.assertIsNone(cfg.save_total_limit)
         self.assertEqual(cfg.report_to, "none")
         self.assertEqual(cfg.wandb_mode, "offline")
         self.assertEqual(cfg.wandb_project, "qwen3-math-posttrain")
@@ -134,8 +225,53 @@ class GRPOUtilsTest(unittest.TestCase):
         self.assertEqual(cfg.max_completion_length, 256)
         self.assertEqual(cfg.num_generations, 2)
         self.assertEqual(cfg.gradient_accumulation_steps, 4)
+        self.assertEqual(cfg.beta, 0.02)
+        self.assertEqual(cfg.reward_strict_boxed_bonus, 0.02)
         self.assertEqual(cfg.logging_steps, 1)
+        self.assertEqual(cfg.save_strategy, "steps")
+        self.assertEqual(cfg.save_steps, 25)
         self.assertEqual(cfg.report_to, "wandb")
+
+    def test_ablate_grpo_config_loads(self) -> None:
+        cfg = load_grpo_config(ROOT / "configs" / "grpo_ablate.yaml")
+        self.assertEqual(cfg.max_steps, 100)
+        self.assertEqual(cfg.save_strategy, "steps")
+        self.assertEqual(cfg.save_steps, 25)
+        self.assertEqual(cfg.save_total_limit, 4)
+        self.assertEqual(cfg.beta, 0.02)
+        self.assertEqual(cfg.reward_strict_boxed_bonus, 0.02)
+        self.assertEqual(cfg.reward_length_coef, 1.0e-4)
+
+    def test_no_format_ablate_grpo_config_loads(self) -> None:
+        cfg = load_grpo_config(ROOT / "configs" / "grpo_ablate_no_format.yaml")
+        self.assertEqual(cfg.max_steps, 100)
+        self.assertEqual(cfg.beta, 0.02)
+        self.assertEqual(cfg.reward_strict_boxed_bonus, 0.0)
+
+    def test_no_length_ablate_grpo_config_loads(self) -> None:
+        cfg = load_grpo_config(ROOT / "configs" / "grpo_ablate_no_length.yaml")
+        self.assertEqual(cfg.max_steps, 100)
+        self.assertEqual(cfg.beta, 0.02)
+        self.assertEqual(cfg.reward_length_coef, 0.0)
+
+    def test_correct_only_ablate_grpo_config_loads(self) -> None:
+        cfg = load_grpo_config(ROOT / "configs" / "grpo_ablate_correct_only.yaml")
+        self.assertEqual(cfg.max_steps, 100)
+        self.assertEqual(cfg.reward_strict_boxed_bonus, 0.0)
+
+    def test_eval_config_loads(self) -> None:
+        cfg = load_eval_config(ROOT / "configs" / "eval.yaml")
+        self.assertEqual(cfg.eval_dataset, Path("data/eval/gsm8k_dev200.jsonl"))
+        self.assertEqual(cfg.test_dataset, Path("data/eval/math500_test.jsonl"))
+        self.assertEqual(cfg.eval_backend, "vllm")
+        self.assertEqual(cfg.eval_attn_implementation, "sdpa")
+        self.assertEqual(cfg.eval_max_new_tokens, 512)
+
+    def test_grpo_config_supports_base_inheritance(self) -> None:
+        cfg = load_grpo_config(ROOT / "configs" / "grpo_ablate_no_format.yaml")
+        self.assertEqual(cfg.batch_size, 16)
+        self.assertEqual(cfg.train_dataset, Path("data/grpo/train_grpo_gsm8k_1k_middiff.jsonl"))
+        self.assertEqual(cfg.reward_strict_boxed_bonus, 0.0)
 
     def test_infer_source_detects_gsm8k(self) -> None:
         self.assertEqual(infer_source("openai/gsm8k", "auto"), "gsm8k")
@@ -176,6 +312,14 @@ class GRPOUtilsTest(unittest.TestCase):
             epoch = 1.5
 
         set_reward_tokenizer(DummyTokenizer())
+        set_reward_config(
+            correct=1.0,
+            wrong=-0.2,
+            parse_fail=-0.2,
+            strict_boxed_bonus=0.02,
+            length_coef=1e-4,
+            use_relaxed_correctness=True,
+        )
         combined_reward([], ["Reasoning\n\nFinal answer: \\boxed{4}"], ["4"])
         with tempfile.TemporaryDirectory() as tmpdir:
             output = Path(tmpdir) / "train_log.jsonl"
@@ -202,6 +346,14 @@ class GRPOUtilsTest(unittest.TestCase):
                 self.logged.append((record, step))
 
         set_reward_tokenizer(DummyTokenizer())
+        set_reward_config(
+            correct=1.0,
+            wrong=-0.2,
+            parse_fail=-0.2,
+            strict_boxed_bonus=0.02,
+            length_coef=1e-4,
+            use_relaxed_correctness=True,
+        )
         combined_reward([], ["Reasoning\n\nFinal answer: \\boxed{4}"], ["4"])
         with tempfile.TemporaryDirectory() as tmpdir:
             output = Path(tmpdir) / "train_log.jsonl"

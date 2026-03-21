@@ -29,7 +29,7 @@ Qwen3 数学后训练项目
 ## 模型策略
 
 * 开发模型：`Qwen/Qwen3-1.7B-Base`
-* 最终实验模型：`Qwen/Qwen3-8B-Base`
+* 最终实验模型：`Qwen/Qwen3-4B-Base`
 
 开发阶段优先使用 1.7B，以保证调试速度和迭代效率。
 

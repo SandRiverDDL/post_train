@@ -25,7 +25,6 @@ description: 在新会话开始时使用。用于快速理解仓库结构、当�
 2. `ROADMAP.md`
 3. `STATE.md`
 4. `TASK.md`
-5. `docs/phase*.md`（如果存在）
 
 提取信息：
 

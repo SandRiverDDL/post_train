@@ -10,6 +10,8 @@
 
 - `combined_reward`
 
+所有 reward 系数都直接由训练 yaml 提供。
+
 ## 默认权重
 
 - `combined_reward = 1.0`
@@ -18,17 +20,18 @@
 
 ### combined reward
 
-- 正确且可解析：基础分 `+1.0`
-- 可解析但答案错误：基础分 `-0.2`
-- 解析失败：基础分 `-0.2`
-- 满足 strict `Final answer: \boxed{...}`：额外 `+0.05`
-- 长度惩罚：`-1e-4 * cleaned_completion_tokens`
+- relaxed 或 strict 正确性，由 `reward_use_relaxed_correctness` 控制
+- 正确答案分数：`reward_correct`
+- 错误答案分数：`reward_wrong`
+- 解析失败分数：`reward_parse_fail`
+- strict boxed 奖励：`reward_strict_boxed_bonus`
+- 长度惩罚：`reward_length_coef * cleaned_completion_tokens`
 
 语义约束：
 
 - `wrong` 与 `parse fail` 互斥
-- `format` 可与 `correct` 或 `wrong` 叠加
-- `parse fail` 不再叠加 `format`
+- strict boxed bonus 可与 `correct` 或 `wrong` 叠加
+- `parse fail` 不再叠加 strict bonus
 
 ## 设计原则
 
@@ -52,9 +55,12 @@
 训练日志额外记录以下诊断指标：
 
 - `rewards/correct_rate`
+- `rewards/relaxed_correct_rate`
+- `rewards/strict_correct_rate`
 - `rewards/wrong_rate`
 - `rewards/parse_fail_rate`
 - `rewards/format_rate`
+- `rewards/strict_boxed_rate`
 - `rewards/mean_length_penalty`
 
 ## 非目标

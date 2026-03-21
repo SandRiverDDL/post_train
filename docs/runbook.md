@@ -80,7 +80,7 @@ just eval-test limit=20
 
 ## 参数约定
 
-- `CONFIG`：配置文件路径，默认 `configs/sft.yaml`
+- `CONFIG`：评测配置文件路径，默认 `configs/eval.yaml`
 - `model`：覆盖评测模型；不传则使用配置中的 base model
 - `backend`：`vllm` 或 `hf`
 - `batch_size`：评测 batch size
@@ -115,5 +115,5 @@ just eval-test limit=20
 - 默认 backend 是 `vllm`
 - 当前默认 `eval_gpu_memory_utilization=0.85`
 - 如果 engine 初始化仍失败，可继续降低到 `0.8`
-- 如果评测 base model 走本地 cache，默认模型路径来自 `configs/sft.yaml`
+- 如果评测 base model 走本地 cache，默认模型路径来自 `configs/eval.yaml`
 - `hf` 后端仅建议作为排障备用；默认工作流统一使用 `vllm`

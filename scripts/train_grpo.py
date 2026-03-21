@@ -20,6 +20,7 @@ from rl.grpo import (
     build_grpo_prompt,
     default_reward_weights,
     reward_functions,
+    set_reward_config,
     set_reward_tokenizer,
 )
 from rl.io import ensure_parent, read_jsonl
@@ -126,6 +127,14 @@ def main() -> None:
 
     model, tokenizer, GRPOConfig, GRPOTrainer, is_bfloat16_supported = load_model_and_tokenizer(cfg)
     train_dataset = build_grpo_dataset(cfg.train_dataset)
+    set_reward_config(
+        correct=cfg.reward_correct,
+        wrong=cfg.reward_wrong,
+        parse_fail=cfg.reward_parse_fail,
+        strict_boxed_bonus=cfg.reward_strict_boxed_bonus,
+        length_coef=cfg.reward_length_coef,
+        use_relaxed_correctness=cfg.reward_use_relaxed_correctness,
+    )
     set_reward_tokenizer(tokenizer)
     reward_funcs = reward_functions()
 
@@ -135,6 +144,7 @@ def main() -> None:
         per_device_train_batch_size=cfg.batch_size,
         gradient_accumulation_steps=cfg.gradient_accumulation_steps,
         num_train_epochs=cfg.epochs,
+        max_steps=cfg.max_steps,
         warmup_ratio=cfg.warmup_ratio,
         weight_decay=cfg.weight_decay,
         bf16=is_bfloat16_supported(),
@@ -154,7 +164,9 @@ def main() -> None:
         mask_truncated_completions=cfg.mask_truncated_completions,
         top_entropy_quantile=cfg.top_entropy_quantile,
         logging_steps=cfg.logging_steps,
-        save_strategy="epoch",
+        save_strategy=cfg.save_strategy,
+        save_steps=cfg.save_steps,
+        save_total_limit=cfg.save_total_limit,
         report_to="none",
         seed=cfg.seed,
         log_completions=cfg.log_completions,
@@ -187,11 +199,12 @@ def main() -> None:
                 "reward_functions": ["combined_reward"],
                 "reward_weights": default_reward_weights(),
                 "reward_formula": {
-                    "correct": 1.0,
-                    "wrong": -0.2,
-                    "format": 0.05,
-                    "length": "-1e-4 * cleaned_completion_tokens",
-                    "parse_fail": -0.2,
+                    "correct": cfg.reward_correct,
+                    "wrong": cfg.reward_wrong,
+                    "parse_fail": cfg.reward_parse_fail,
+                    "strict_boxed_bonus": cfg.reward_strict_boxed_bonus,
+                    "length_coef": cfg.reward_length_coef,
+                    "use_relaxed_correctness": cfg.reward_use_relaxed_correctness,
                 },
                 "loss_type": cfg.loss_type,
                 "mask_truncated_completions": cfg.mask_truncated_completions,

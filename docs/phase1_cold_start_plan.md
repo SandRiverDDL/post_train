@@ -1,5 +1,7 @@
 # Phase 1 Cold Start Plan
 
+> 历史归档文档：本文件记录 Phase 1 冷启动设计，不再作为当前 Phase 2 的主执行文档。当前事实来源请优先查看 [`STATE.md`](/home/chy/code/active/rl/STATE.md) 和 [`TASK.md`](/home/chy/code/active/rl/TASK.md)。
+
 ## 目标
 
 当前 Phase 1 的首要目标不是进一步追求 benchmark 分数，而是先得到一个能稳定输出：

@@ -24,14 +24,14 @@
 - [x] 当前不再推荐直接使用原始长解答 `3k` 作为 GRPO 冷启动唯一 SFT 数据
 - [x] GRPO 主干路线已改为 `Unsloth + 单卡优先`
 - [x] GRPO 主训练数据已从 `NuminaMath` 切到 `GSM8K train(main) + response token <= 128`
+- [x] 评测配置已拆分为 `configs/eval.yaml`，评测脚本默认不再依赖 `configs/sft.yaml`
 
 ## 下一步
 
-- [ ] 补跑 `MATH500 test` 正式结果，作为 Phase 1 收尾指标
-- [ ] 固化 SFT 最佳配置到文档和结果记录
-- [ ] 在单卡真实 GPU 环境验证 `Unsloth GRPO` 至少稳定跑过前几个训练 step
-- [ ] 确认 `outputs/sft-qwen3-1.7b` 冷启动路径在 `Unsloth GRPO` 下可继续训练
-- [ ] 验证切换到 `GSM8K train` 后，GRPO reward 稀疏问题是否明显缓解
-- [ ] 用 `vLLM` 给 `GSM8K short` 候选集做离线难度打分，并产出可复用的 scored 工件
-- [ ] 从 scored 工件中筛出 `1K` 中等难度训练集，验证是否优于当前 `0.5K` 随机 short 子集
-- [ ] GRPO 跑通后，再补 Phase 2 对照：`base vs SFT vs GRPO`
+- [ ] 分析并修复当前 `GRPO strict 提升 / flexible 下降` 的目标错位问题
+- [x] 落地下一轮 GRPO 的 `_base_` 配置继承，并支持短程消融
+- [x] 增加按 step 保存 checkpoint 的能力，并补充顺序评测脚本
+- [ ] 用短程消融验证 `format/length` reward 是否导致 `flexible` 下滑
+- [ ] 固化离线难度筛选流程，继续使用 `1K middiff` 路线而不是回退随机 short 子集
+- [ ] 在目标函数问题收敛后，再补 Phase 2 对照：`base vs SFT vs GRPO`
+- [ ] `MATH500 test` 留到 GRPO 方向稳定后再补跑

@@ -1,0 +1,5 @@
+_base_: grpo_ablate.yaml
+
+output_dir: outputs/grpo-qwen3-1.7b-ablate-correct-only
+reward_strict_boxed_bonus: 0.0
+reward_length_coef: 0.0

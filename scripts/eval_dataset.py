@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from rl.config import load_config
+from rl.config import load_eval_config
 from rl.harness_tasks import (
     preview_logged_samples,
     resolve_model_args,
@@ -21,7 +21,7 @@ from rl.harness_tasks import (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="用 lm-evaluation-harness 评测本地数学数据集。")
-    parser.add_argument("--config", default="configs/sft.yaml", help="配置文件路径")
+    parser.add_argument("--config", default="configs/eval.yaml", help="评测配置文件路径")
     parser.add_argument("--model", default=None, help="待评测模型路径，默认使用配置中的 base model")
     parser.add_argument("--dataset", default=None, help="评测集路径，默认使用配置中的 eval_dataset")
     parser.add_argument("--limit", default=None, help="仅评测前 N 条")
@@ -58,7 +58,7 @@ def _normalize_int(value: str | None, *prefixes: str) -> int | None:
 
 def main() -> None:
     args = parse_args()
-    cfg = load_config(args.config)
+    cfg = load_eval_config(args.config)
     backend = _normalize_prefixed_value(args.backend, "backend") or cfg.eval_backend
     if backend not in {"vllm", "hf"}:
         raise ValueError(f"不支持的 backend: {backend}")

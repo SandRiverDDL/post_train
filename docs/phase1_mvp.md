@@ -1,5 +1,7 @@
 # Phase 1：SFT + GSM8K / MATH500 Eval
 
+> 历史归档文档：Phase 1 已完成。本文件用于保留 SFT 设计与阶段结论，不再作为当前 Phase 2 的主事实来源。当前状态与优先级请优先查看 [`STATE.md`](/home/chy/code/active/rl/STATE.md) 和 [`TASK.md`](/home/chy/code/active/rl/TASK.md)。
+
 ## 目标
 
 构建一个可信的最小闭环：
@@ -164,6 +166,7 @@ Final answer: \boxed{...}
 
 - benchmark 正确率由 `lm-eval` 原生 task 负责，避免自写 evaluator 的 dirty work。
 - `GSM8K dev200` 和 `MATH500 test` 使用同一个评测入口，靠 `--dataset` 切换。
+- 评测脚本默认读取 [`configs/eval.yaml`](/home/chy/code/active/rl/configs/eval.yaml)，不再默认挂靠 `configs/sft.yaml`。
 - 如果后续还要统计 boxed 格式合规率，应单独作为 format-check 指标，不与 benchmark 正确率耦合。
 - LoRA/SFT 产物在进入 GRPO 前，还必须在 `data/train_sft.jsonl` 上跑一次工程验收；这一步继续复用同一个评测入口，但指标解释与 benchmark 不同。
 
