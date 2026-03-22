@@ -17,11 +17,18 @@ from rl.harness_tasks import (
     run_harness_eval,
     write_result,
 )
+from rl.local_eval import run_official_eval
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="用 lm-evaluation-harness 评测本地数学数据集。")
+    parser = argparse.ArgumentParser(description="评测本地数学数据集。")
     parser.add_argument("--config", default="configs/eval.yaml", help="评测配置文件路径")
+    parser.add_argument(
+        "--mode",
+        choices=("official", "benchmark"),
+        default="official",
+        help="official 使用本地 boxed/math-verify 评测；benchmark 使用 harness 原生 benchmark。",
+    )
     parser.add_argument("--model", default=None, help="待评测模型路径，默认使用配置中的 base model")
     parser.add_argument("--dataset", default=None, help="评测集路径，默认使用配置中的 eval_dataset")
     parser.add_argument("--limit", default=None, help="仅评测前 N 条")
@@ -88,6 +95,28 @@ def main() -> None:
     max_gen_toks = _normalize_int(args.max_new_tokens, "max_new_tokens", "max-new-tokens") or cfg.eval_max_new_tokens
     limit = _normalize_int(args.limit, "limit")
     max_batch_size = _normalize_int(args.max_batch_size, "max_batch_size", "max-batch-size")
+
+    if args.mode == "official":
+        result = run_official_eval(
+            backend=backend,
+            requested_model=model_value,
+            base_model=cfg.model_name,
+            dataset_path=dataset_path,
+            limit=limit,
+            batch_size=args.batch_size,
+            max_new_tokens=max_gen_toks,
+            max_length=cfg.max_seq_length,
+            device=args.device,
+            attn_implementation=attn_implementation,
+            gpu_memory_utilization=cfg.eval_gpu_memory_utilization,
+            prompt_version=cfg.prompt_version,
+            seed=42,
+        )
+        print(json.dumps(result["metrics"], ensure_ascii=False, indent=2))
+        output_value = _normalize_prefixed_value(args.output, "output")
+        if output_value:
+            write_result(output_value, result)
+        return
 
     try:
         result = run_harness_eval(

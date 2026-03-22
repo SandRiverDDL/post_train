@@ -10,8 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from rl.config import load_eval_config
-from rl.harness_tasks import resolve_model_args, resolve_result_task_name, run_harness_eval
 from rl.io import ensure_parent
+from rl.local_eval import run_official_eval
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,6 +54,14 @@ def _checkpoint_step(path: Path) -> int:
     return 10**12
 
 
+def default_output_path(run_dir: Path, dataset_path: Path) -> Path:
+    return run_dir / f"checkpoint_eval_{dataset_path.stem}.jsonl"
+
+
+def default_json_output_path(run_dir: Path, dataset_path: Path) -> Path:
+    return run_dir / f"checkpoint_eval_{dataset_path.stem}.json"
+
+
 def collect_model_dirs(run_dir: Path, include_final: bool) -> list[Path]:
     checkpoints = sorted(
         [path for path in run_dir.iterdir() if path.is_dir() and path.name.startswith("checkpoint-")],
@@ -62,6 +70,13 @@ def collect_model_dirs(run_dir: Path, include_final: bool) -> list[Path]:
     if include_final and (run_dir / "adapter_config.json").exists():
         checkpoints.append(run_dir)
     return checkpoints
+
+
+def _best_checkpoint_by_accuracy(rows: list[dict[str, object]]) -> dict[str, object] | None:
+    scored_rows = [row for row in rows if row.get("normalized_accuracy") is not None]
+    if not scored_rows:
+        return None
+    return max(scored_rows, key=lambda row: float(row["normalized_accuracy"]))
 
 
 def main() -> None:
@@ -85,50 +100,62 @@ def main() -> None:
     ) or cfg.eval_attn_implementation
     max_gen_toks = _normalize_int(args.max_new_tokens, "max_new_tokens", "max-new-tokens") or cfg.eval_max_new_tokens
     limit = _normalize_int(args.limit, "limit")
-    max_batch_size = _normalize_int(args.max_batch_size, "max_batch_size", "max-batch-size")
+    output_path = ensure_parent(Path(args.output) if args.output else default_output_path(run_dir, dataset_path))
+    json_output_path = ensure_parent(default_json_output_path(run_dir, dataset_path))
+    output_path.write_text("", encoding="utf-8")
 
-    output_path = Path(args.output) if args.output else None
-    if output_path is not None:
-        ensure_parent(output_path).write_text("", encoding="utf-8")
-
-    result_task_name = resolve_result_task_name(dataset_path, dataset_path.stem.replace("-", "_"))
     summary_rows: list[dict[str, object]] = []
-    for model_dir in checkpoints:
-        model_args = resolve_model_args(
-            str(model_dir),
-            cfg.model_name,
+    for index, model_dir in enumerate(checkpoints, start=1):
+        print(f"[{index}/{len(checkpoints)}] evaluating {model_dir.name}")
+        result = run_official_eval(
             backend=backend,
+            requested_model=str(model_dir),
+            base_model=cfg.model_name,
+            dataset_path=dataset_path,
+            batch_size=args.batch_size,
+            limit=limit,
+            max_new_tokens=max_gen_toks,
             max_length=cfg.max_seq_length,
             device=args.device,
             attn_implementation=attn_implementation,
             gpu_memory_utilization=cfg.eval_gpu_memory_utilization,
+            prompt_version=cfg.prompt_version,
+            seed=42,
+            preview_count=0,
         )
-        result = run_harness_eval(
-            backend=backend,
-            model_args=model_args,
-            dataset_path=dataset_path,
-            task_name=dataset_path.stem.replace("-", "_"),
-            batch_size=args.batch_size,
-            max_batch_size=max_batch_size,
-            limit=limit,
-            strict=True,
-            max_gen_toks=max_gen_toks,
-        )
-        metrics = result["results"].get(result_task_name, {})
+        metrics = result["metrics"]
         row = {
             "model_dir": str(model_dir),
             "checkpoint": model_dir.name,
             "step": None if model_dir == run_dir else _checkpoint_step(model_dir),
-            "strict_match": metrics.get("exact_match,strict-match"),
-            "strict_stderr": metrics.get("exact_match_stderr,strict-match"),
-            "flexible_extract": metrics.get("exact_match,flexible-extract"),
-            "flexible_stderr": metrics.get("exact_match_stderr,flexible-extract"),
+            "dataset": metrics.get("dataset", str(dataset_path)),
+            "samples": metrics.get("samples"),
+            "format_success_rate": metrics.get("format_success_rate"),
+            "format_success_stderr": metrics.get("format_success_stderr"),
+            "parse_success_rate": metrics.get("parse_success_rate"),
+            "parse_success_stderr": metrics.get("parse_success_stderr"),
+            "normalized_accuracy": metrics.get("normalized_accuracy"),
+            "normalized_accuracy_stderr": metrics.get("normalized_accuracy_stderr"),
         }
         summary_rows.append(row)
-        print(json.dumps(row, ensure_ascii=False))
-        if output_path is not None:
-            with output_path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        with output_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    summary = {
+        "run_dir": str(run_dir),
+        "dataset": str(dataset_path),
+        "rows": summary_rows,
+        "best_checkpoint_by_normalized_accuracy": _best_checkpoint_by_accuracy(summary_rows),
+    }
+    with json_output_path.open("w", encoding="utf-8") as fh:
+        json.dump(summary, fh, ensure_ascii=False, indent=2)
+    print(f"wrote {len(summary_rows)} rows to {output_path}")
+    best_row = summary["best_checkpoint_by_normalized_accuracy"]
+    if best_row is not None:
+        print(
+            "best normalized_accuracy: "
+            f"{best_row['checkpoint']} = {best_row['normalized_accuracy']}"
+        )
+    print(f"wrote summary json to {json_output_path}")
 
 
 if __name__ == "__main__":

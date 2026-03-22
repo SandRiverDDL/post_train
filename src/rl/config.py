@@ -31,6 +31,7 @@ class SFTConfig(BaseModel):
     eval_backend: str = "vllm"
     eval_attn_implementation: str = "sdpa"
     eval_gpu_memory_utilization: float = Field(default=0.85, gt=0.0, le=1.0)
+    prompt_version: str = "v1"
 
 
 class EvalConfig(BaseModel):
@@ -46,6 +47,7 @@ class EvalConfig(BaseModel):
     eval_backend: str = "vllm"
     eval_attn_implementation: str = "sdpa"
     eval_gpu_memory_utilization: float = Field(default=0.85, gt=0.0, le=1.0)
+    prompt_version: str = "v1"
 
 
 class GRPOTrainConfig(BaseModel):
@@ -101,6 +103,7 @@ class GRPOTrainConfig(BaseModel):
     wandb_project: str = "qwen3-math-posttrain"
     wandb_run_name: str | None = None
     wandb_tags: list[str] = Field(default_factory=list)
+    prompt_version: str = "v1"
 
 
 def load_config(path: str | Path) -> SFTConfig:

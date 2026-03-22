@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import random
+from collections import defaultdict
 from typing import Any
 
 from rl.answers import ensure_boxed_final_answer, extract_relaxed_final_answer
@@ -41,6 +43,52 @@ COMPLETION_HEADER_PATTERNS = [
     re.compile(r"^\s*answer\.?\s*$", re.IGNORECASE),
     re.compile(r"^\s*soln\.?\s*$", re.IGNORECASE),
 ]
+
+
+def scaled_category_targets(total_samples: int) -> dict[str, int]:
+    base_total = sum(NUMINA_CATEGORY_TARGETS.values())
+    if total_samples <= 0:
+        raise ValueError("train_num_samples 必须大于 0")
+
+    raw_targets = {
+        category: total_samples * target / base_total
+        for category, target in NUMINA_CATEGORY_TARGETS.items()
+    }
+    scaled = {category: int(value) for category, value in raw_targets.items()}
+    remainder = total_samples - sum(scaled.values())
+    ranking = sorted(
+        raw_targets.items(),
+        key=lambda item: (item[1] - scaled[item[0]], NUMINA_CATEGORY_TARGETS[item[0]]),
+        reverse=True,
+    )
+    for category, _ in ranking[:remainder]:
+        scaled[category] += 1
+    return scaled
+
+
+def sample_numinamath(rows: list[dict[str, Any]], rng: random.Random, total_samples: int) -> list[dict[str, Any]]:
+    targets = scaled_category_targets(total_samples)
+    buckets: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        buckets[str(row.get("problem_type", infer_problem_type(row)))].append(row)
+
+    summary = {category: len(buckets.get(category, [])) for category in targets}
+    missing = {
+        category: target
+        for category, target in targets.items()
+        if len(buckets.get(category, [])) < target
+    }
+    if missing:
+        raise ValueError(f"NuminaMath 分层抽样样本不足：{missing}；当前计数：{summary}")
+
+    sampled: list[dict[str, Any]] = []
+    for category, target in targets.items():
+        bucket = list(buckets[category])
+        rng.shuffle(bucket)
+        sampled.extend(bucket[:target])
+
+    rng.shuffle(sampled)
+    return sampled
 
 
 def _first_present(row: dict[str, Any], candidates: tuple[str, ...], default: str) -> str:
@@ -164,12 +212,20 @@ def format_eval_text(question: str, final_answer: str) -> str:
     return format_sft_text(question, f"Final answer: \\boxed{{{final_answer}}}")
 
 
-def format_protocol_prompt(question: str) -> str:
-    return (
-        f"Question:\n{question}\n\n"
-        "要求：\n"
-        "请给出必要推理。\n"
-        "最后一行必须严格写成：\n"
-        "Final answer: \\boxed{...}\n\n"
-        "Solution:\n"
-    )
+def format_protocol_prompt(question: str, *, prompt_version: str = "v1") -> str:
+    if prompt_version == "v1":
+        return (
+            f"Question:\n{question}\n\n"
+            "要求：\n"
+            "请给出必要推理。\n"
+            "最后一行必须严格写成：\n"
+            "Final answer: \\boxed{...}\n\n"
+            "Solution:\n"
+        )
+    if prompt_version == "v2":
+        return (
+            "Please reason step by step, and put your final answer within \\boxed{}.\n\n"
+            f"Question:\n{question}\n\n"
+            "Solution:\n"
+        )
+    raise ValueError(f"不支持的 prompt_version: {prompt_version}")

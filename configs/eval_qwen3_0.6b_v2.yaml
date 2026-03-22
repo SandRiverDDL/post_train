@@ -1,0 +1,4 @@
+_base_: eval.yaml
+
+model_name: Qwen/Qwen3-0.6B-Base
+prompt_version: v2

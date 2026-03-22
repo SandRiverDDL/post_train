@@ -26,8 +26,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _build_prompt(row: dict[str, str]) -> str:
-    return format_protocol_prompt(row["question"])
+def _build_prompt(row: dict[str, str], *, prompt_version: str = "v1") -> str:
+    return format_protocol_prompt(row["question"], prompt_version=prompt_version)
 
 
 def _tokenize_prompt_completion(
@@ -55,25 +55,25 @@ def _tokenize_prompt_completion(
     }
 
 
-def build_train_dataset(path: Path, tokenizer, max_length: int) -> Dataset:
+def build_train_dataset(path: Path, tokenizer, max_length: int, *, prompt_version: str = "v1") -> Dataset:
     rows = read_jsonl(path)
     tokenized_rows = []
     for row in rows:
-        prompt = _build_prompt(row)
+        prompt = _build_prompt(row, prompt_version=prompt_version)
         completion = clean_completion_for_protocol(row["solution"])
         tokenized = _tokenize_prompt_completion(tokenizer, prompt, completion, max_length)
         tokenized_rows.append(tokenized)
     return Dataset.from_list(tokenized_rows)
 
 
-def preview_samples(path: Path) -> None:
+def preview_samples(path: Path, *, prompt_version: str = "v1") -> None:
     rows = read_jsonl(path)[:3]
     for row in rows:
         print("=" * 80)
         print(f"id: {row['id']}")
         print(row["question"][:300])
         print("--- prompt ---")
-        print(_build_prompt(row))
+        print(_build_prompt(row, prompt_version=prompt_version))
         print("--- completion tail ---")
         cleaned_completion = clean_completion_for_protocol(row["solution"])
         print("\n".join(cleaned_completion.splitlines()[-4:]))
@@ -92,7 +92,7 @@ def main() -> None:
         else cfg.gradient_accumulation_steps
     )
 
-    preview_samples(train_dataset_path)
+    preview_samples(train_dataset_path, prompt_version=cfg.prompt_version)
 
     import unsloth  # noqa: F401
     from trl import SFTConfig, SFTTrainer
@@ -103,7 +103,12 @@ def main() -> None:
         max_seq_length=cfg.max_seq_length,
         load_in_4bit=True,
     )
-    train_dataset = build_train_dataset(train_dataset_path, tokenizer, cfg.max_seq_length)
+    train_dataset = build_train_dataset(
+        train_dataset_path,
+        tokenizer,
+        cfg.max_seq_length,
+        prompt_version=cfg.prompt_version,
+    )
 
     model = FastLanguageModel.get_peft_model(
         model,

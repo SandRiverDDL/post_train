@@ -17,6 +17,11 @@ class EvalDatasetScriptTest(unittest.TestCase):
             args = parse_args()
         self.assertEqual(args.config, "configs/eval.yaml")
 
+    def test_parse_args_defaults_to_official_mode(self) -> None:
+        with patch.object(sys, "argv", ["eval_dataset.py"]):
+            args = parse_args()
+        self.assertEqual(args.mode, "official")
+
 
 if __name__ == "__main__":
     unittest.main()

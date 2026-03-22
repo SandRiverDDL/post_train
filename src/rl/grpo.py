@@ -12,14 +12,14 @@ from rl.data import clean_completion_for_protocol, format_protocol_prompt
 from rl.io import ensure_parent, read_jsonl
 
 
-def build_grpo_prompt(question: str) -> str:
-    return format_protocol_prompt(question)
+def build_grpo_prompt(question: str, *, prompt_version: str = "v1") -> str:
+    return format_protocol_prompt(question, prompt_version=prompt_version)
 
 
-def build_grpo_dataset(path: str | Path) -> Dataset:
+def build_grpo_dataset(path: str | Path, *, prompt_version: str = "v1") -> Dataset:
     rows = read_jsonl(path)
     for row in rows:
-        row["prompt"] = build_grpo_prompt(str(row["question"]))
+        row["prompt"] = build_grpo_prompt(str(row["question"]), prompt_version=prompt_version)
     return Dataset.from_list(rows)
 
 
@@ -27,13 +27,14 @@ def build_grpo_record(
     row: dict[str, Any],
     *,
     prompt: str | None = None,
+    prompt_version: str = "v1",
     response_tokens: int | None = None,
     reference_solution: str | None = None,
 ) -> dict[str, Any]:
     record = {
         "id": str(row["id"]),
         "question": row["question"],
-        "prompt": prompt or build_grpo_prompt(str(row["question"])),
+        "prompt": prompt or build_grpo_prompt(str(row["question"]), prompt_version=prompt_version),
         "final_answer": str(row["final_answer"]),
         "source": str(row.get("source", "numinamath")),
         "problem_type": str(row.get("problem_type", "Other")),

@@ -17,7 +17,10 @@ from rl.harness_tasks import resolve_model_args
 from rl.io import ensure_parent, read_jsonl, write_jsonl
 
 
-PROMPT_VERSION = "protocol_prompt_v1"
+PROMPT_VERSION_MAP = {
+    "v1": "protocol_prompt_v1",
+    "v2": "protocol_prompt_v2",
+}
 PROTOCOL_VERSION = "strict_boxed_v1"
 
 
@@ -49,11 +52,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def resolve_prompt(row: dict[str, Any]) -> str:
+def resolve_prompt(row: dict[str, Any], *, prompt_version: str = "v1") -> str:
     prompt = str(row.get("prompt", "")).strip()
     if prompt:
         return prompt
-    return format_protocol_prompt(str(row["question"]))
+    return format_protocol_prompt(str(row["question"]), prompt_version=prompt_version)
 
 
 def build_sampling_spec(args: argparse.Namespace) -> dict[str, Any]:
@@ -75,7 +78,7 @@ def build_cache_key(
     prompt: str,
     model_id: str,
     sampling: dict[str, Any],
-    prompt_version: str = PROMPT_VERSION,
+    prompt_version: str = "protocol_prompt_v1",
     protocol_version: str = PROTOCOL_VERSION,
 ) -> str:
     payload = {
@@ -143,11 +146,12 @@ def build_scored_record(
     model_id: str,
     sampling: dict[str, Any],
     metrics: dict[str, Any],
+    prompt_version: str,
 ) -> dict[str, Any]:
     scored = dict(row)
     scored["prompt"] = prompt
     scored["score_model_id"] = model_id
-    scored["score_prompt_version"] = PROMPT_VERSION
+    scored["score_prompt_version"] = prompt_version
     scored["score_protocol_version"] = PROTOCOL_VERSION
     scored["score_sampling"] = sampling
     scored["score_cache_key"] = build_cache_key(
@@ -155,6 +159,7 @@ def build_scored_record(
         prompt=prompt,
         model_id=model_id,
         sampling=sampling,
+        prompt_version=prompt_version,
     )
     scored.update(metrics)
     return scored
@@ -203,6 +208,23 @@ def init_vllm(cfg):
     return llm, lora_request
 
 
+def build_progress_status(
+    *,
+    processed_problems: int,
+    total_problems: int,
+    num_samples_per_problem: int,
+    batch_index: int,
+    total_batches: int,
+) -> str:
+    processed_completions = processed_problems * num_samples_per_problem
+    total_completions = total_problems * num_samples_per_problem
+    return (
+        f"problems {processed_problems}/{total_problems} | "
+        f"completions {processed_completions}/{total_completions} | "
+        f"batch {batch_index}/{total_batches}"
+    )
+
+
 def score_pending_rows(
     pending_rows: list[dict[str, Any]],
     *,
@@ -214,6 +236,7 @@ def score_pending_rows(
         return []
 
     from vllm import SamplingParams
+    from tqdm.auto import tqdm
 
     llm, lora_request = init_vllm(cfg)
     sampling_params = SamplingParams(
@@ -224,33 +247,50 @@ def score_pending_rows(
         repetition_penalty=1.0,
     )
     model_id = build_score_model_id(cfg)
+    prompt_version = PROMPT_VERSION_MAP.get(cfg.prompt_version, cfg.prompt_version)
     scored_rows: list[dict[str, Any]] = []
+    total_batches = (len(pending_rows) + batch_size - 1) // batch_size
+    progress = tqdm(total=len(pending_rows), desc="scoring problems", unit="problem")
 
-    for start in range(0, len(pending_rows), batch_size):
-        batch = pending_rows[start : start + batch_size]
-        prompts = [resolve_prompt(row) for row in batch]
-        outputs = llm.generate(
-            prompts,
-            sampling_params,
-            use_tqdm=True,
-            lora_request=lora_request,
-        )
-        for row, prompt, output in zip(batch, prompts, outputs, strict=True):
-            completions: list[str] = []
-            token_counts: list[int] = []
-            for candidate in output.outputs:
-                completions.append(candidate.text)
-                token_counts.append(len(candidate.token_ids))
-            metrics = summarize_trial_results(completions, token_counts, str(row["final_answer"]))
-            scored_rows.append(
-                build_scored_record(
-                    row,
-                    prompt=prompt,
-                    model_id=model_id,
-                    sampling=sampling,
-                    metrics=metrics,
+    try:
+        for batch_offset, start in enumerate(range(0, len(pending_rows), batch_size), start=1):
+            batch = pending_rows[start : start + batch_size]
+            prompts = [resolve_prompt(row, prompt_version=cfg.prompt_version) for row in batch]
+            outputs = llm.generate(
+                prompts,
+                sampling_params,
+                use_tqdm=False,
+                lora_request=lora_request,
+            )
+            for row, prompt, output in zip(batch, prompts, outputs, strict=True):
+                completions: list[str] = []
+                token_counts: list[int] = []
+                for candidate in output.outputs:
+                    completions.append(candidate.text)
+                    token_counts.append(len(candidate.token_ids))
+                metrics = summarize_trial_results(completions, token_counts, str(row["final_answer"]))
+                scored_rows.append(
+                    build_scored_record(
+                        row,
+                        prompt=prompt,
+                        model_id=model_id,
+                        sampling=sampling,
+                        metrics=metrics,
+                        prompt_version=prompt_version,
+                    )
+                )
+            progress.update(len(batch))
+            progress.set_description_str(
+                build_progress_status(
+                    processed_problems=len(scored_rows),
+                    total_problems=len(pending_rows),
+                    num_samples_per_problem=sampling["num_samples_per_problem"],
+                    batch_index=batch_offset,
+                    total_batches=total_batches,
                 )
             )
+    finally:
+        progress.close()
     return scored_rows
 
 
@@ -265,13 +305,15 @@ def main() -> None:
 
     final_rows: list[dict[str, Any]] = []
     pending_rows: list[dict[str, Any]] = []
+    prompt_version = PROMPT_VERSION_MAP.get(cfg.prompt_version, cfg.prompt_version)
     for row in candidates:
-        prompt = resolve_prompt(row)
+        prompt = resolve_prompt(row, prompt_version=cfg.prompt_version)
         cache_key = build_cache_key(
             row,
             prompt=prompt,
             model_id=model_id,
             sampling=sampling,
+            prompt_version=prompt_version,
         )
         cached = existing_index.get(cache_key)
         if cached is not None:
@@ -292,12 +334,13 @@ def main() -> None:
     row_by_key = {str(row["score_cache_key"]): row for row in final_rows}
     ordered_rows: list[dict[str, Any]] = []
     for row in candidates:
-        prompt = resolve_prompt(row)
+        prompt = resolve_prompt(row, prompt_version=cfg.prompt_version)
         key = build_cache_key(
             row,
             prompt=prompt,
             model_id=model_id,
             sampling=sampling,
+            prompt_version=prompt_version,
         )
         ordered_rows.append(row_by_key[key])
 

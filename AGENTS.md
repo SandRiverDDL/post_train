@@ -87,7 +87,7 @@ scripts/eval_dataset.py
 
 1. 正式结果使用 **strict boxed 协议**。
 2. `GSM8K dev200` 与 `MATH500 test` 统一通过该入口评测，通过 `--dataset` 区分。
-3. 评测框架使用 `lm-evaluation-harness`，数学答案比对使用 `math-verify`。
+3. 正式主评测链路使用本地 prompt + `math-verify` 做答案提取与等价判定；`lm-evaluation-harness` 仅保留为可选 benchmark / 对照模式，不作为当前 Phase 2 正式结论来源。
 4. `data/eval/gsm8k_dev200.jsonl` 一旦确认可用即视为**冻结工件**，不得因 tokenizer 或长度配置变化重新生成。
 5. LoRA / SFT 模型在进入 GRPO 前，必须在 `data/train_sft.jsonl` 上完成工程验收，至少检查：
 
@@ -126,4 +126,3 @@ tests/
 2. 已运行相关最小验证命令并记录结果。
 3. 未引入重复实现（duplicate logic）。
 4. 若改动影响训练或评测链路，必须更新相关说明文档。
-

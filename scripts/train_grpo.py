@@ -83,10 +83,10 @@ def load_model_and_tokenizer(cfg):
     return model, tokenizer, GRPOConfig, GRPOTrainer, is_bfloat16_supported
 
 
-def preview_samples(dataset_path: Path) -> None:
+def preview_samples(dataset_path: Path, *, prompt_version: str = "v1") -> None:
     rows = read_jsonl(dataset_path)[:3]
     for row in rows:
-        prompt = build_grpo_prompt(str(row["question"]))
+        prompt = build_grpo_prompt(str(row["question"]), prompt_version=prompt_version)
         print("=" * 80)
         print(f"id: {row['id']}")
         print(str(row["question"])[:300])
@@ -122,11 +122,11 @@ def init_wandb(cfg) -> Any | None:
 def main() -> None:
     args = parse_args()
     cfg = load_grpo_config(args.config)
-    preview_samples(cfg.train_dataset)
+    preview_samples(cfg.train_dataset, prompt_version=cfg.prompt_version)
     wandb_run = init_wandb(cfg)
 
     model, tokenizer, GRPOConfig, GRPOTrainer, is_bfloat16_supported = load_model_and_tokenizer(cfg)
-    train_dataset = build_grpo_dataset(cfg.train_dataset)
+    train_dataset = build_grpo_dataset(cfg.train_dataset, prompt_version=cfg.prompt_version)
     set_reward_config(
         correct=cfg.reward_correct,
         wrong=cfg.reward_wrong,

@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import random
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 from datasets import load_dataset
@@ -13,7 +13,7 @@ from transformers import AutoTokenizer
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from rl.data import NUMINA_CATEGORY_TARGETS, format_eval_text, format_sft_text, infer_problem_type, to_eval_record, to_sft_record
+from rl.data import format_eval_text, format_sft_text, sample_numinamath, to_eval_record, to_sft_record
 from rl.io import write_jsonl
 
 
@@ -78,52 +78,6 @@ def filter_train_by_response_length(
             continue
         filtered.append(record)
     return filtered
-
-
-def scaled_category_targets(total_samples: int) -> dict[str, int]:
-    base_total = sum(NUMINA_CATEGORY_TARGETS.values())
-    if total_samples <= 0:
-        raise ValueError("train_num_samples 必须大于 0")
-
-    raw_targets = {
-        category: total_samples * target / base_total
-        for category, target in NUMINA_CATEGORY_TARGETS.items()
-    }
-    scaled = {category: int(value) for category, value in raw_targets.items()}
-    remainder = total_samples - sum(scaled.values())
-    ranking = sorted(
-        raw_targets.items(),
-        key=lambda item: (item[1] - scaled[item[0]], NUMINA_CATEGORY_TARGETS[item[0]]),
-        reverse=True,
-    )
-    for category, _ in ranking[:remainder]:
-        scaled[category] += 1
-    return scaled
-
-
-def sample_numinamath(rows: list[dict[str, str]], rng: random.Random, total_samples: int) -> list[dict[str, str]]:
-    targets = scaled_category_targets(total_samples)
-    buckets: dict[str, list[dict[str, str]]] = defaultdict(list)
-    for row in rows:
-        buckets[row.get("problem_type", infer_problem_type(row))].append(row)
-
-    summary = {category: len(buckets.get(category, [])) for category in targets}
-    missing = {
-        category: target
-        for category, target in targets.items()
-        if len(buckets.get(category, [])) < target
-    }
-    if missing:
-        raise ValueError(f"NuminaMath 分层抽样样本不足：{missing}；当前计数：{summary}")
-
-    sampled: list[dict[str, str]] = []
-    for category, target in targets.items():
-        bucket = list(buckets[category])
-        rng.shuffle(bucket)
-        sampled.extend(bucket[:target])
-
-    rng.shuffle(sampled)
-    return sampled
 
 
 def preview_rows(name: str, rows: list[dict[str, str]]) -> None:

@@ -110,6 +110,48 @@ just eval-test limit=20
   --limit 20
 ```
 
+## 0.6B Prompt V2
+
+用于快速迭代的新链路入口：
+
+```bash
+.venv/bin/python scripts/train_sft.py --config configs/sft_qwen3_0.6b_v2.yaml
+```
+
+```bash
+.venv/bin/python scripts/eval_dataset.py \
+  --config configs/eval_qwen3_0.6b_v2.yaml \
+  --model outputs/sft-qwen3-0.6b-v2 \
+  --dataset data/eval/gsm8k_dev200.jsonl \
+  --backend vllm \
+  --batch-size 4 \
+  --max-new-tokens 512 \
+  --output outputs/eval_sft_qwen3_0.6b_v2_gsm8k_dev200_official.json
+```
+
+```bash
+.venv/bin/python scripts/train_grpo.py --config configs/grpo_base_qwen3_0.6b_v2.yaml
+```
+
+当前经验上不应默认 final 最优。每轮 `GRPO` 后至少应补评一个中早期 checkpoint，例如：
+
+```bash
+.venv/bin/python scripts/eval_dataset.py \
+  --config configs/eval_qwen3_0.6b_v2.yaml \
+  --model outputs/grpo-qwen3-0.6b-ablate-v2/checkpoint-25 \
+  --dataset data/eval/gsm8k_dev200.jsonl \
+  --backend vllm \
+  --batch-size 4 \
+  --max-new-tokens 512 \
+  --output outputs/eval_grpo_qwen3_0.6b_v2_checkpoint25_gsm8k_dev200_official.json
+```
+
+当前 Phase 2 的默认解读顺序应为：
+
+1. 先比较 `checkpoint-25/50` 与 final。
+2. 若 early checkpoint 更好，则优先缩短单次训练窗口，而不是继续延长 step。
+3. 不要仅根据 final 一个点判断本轮 GRPO 是否有效。
+
 ## vLLM 说明
 
 - 默认 backend 是 `vllm`
