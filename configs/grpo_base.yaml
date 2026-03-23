@@ -10,19 +10,19 @@ max_completion_length: 512
 
 learning_rate: 1.0e-6
 epochs: 1
-max_steps: -1
-batch_size: 12
+max_steps: -1 # Unsloth GRPO 会按实际 dataloader 长度自动推导；不一定等于样本数 / batch_size
+batch_size: 12 # Unsloth 可能因 num_generations 约束重写有效 batch，进而改变实际 max_steps
 gradient_accumulation_steps: 1
 lora_rank: 16
 lora_alpha: 32
 lora_dropout: 0.0
 load_in_4bit: true
 fast_inference: true
-gpu_memory_utilization: 0.5
+gpu_memory_utilization: 0.6
 warmup_ratio: 0.03
 weight_decay: 0.0
 
-num_generations: 6
+num_generations: 6 # 若 batch_size * grad_accum 不是其整数倍，Unsloth 可能改写有效 train batch size
 num_iterations: 1
 beta: 0.0
 loss_type: dr_grpo

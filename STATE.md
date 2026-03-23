@@ -57,6 +57,14 @@ SFT 结论只保留两点：
   - [score_grpo_candidates.py](/home/chy/code/active/rl/scripts/score_grpo_candidates.py)
   - [select_grpo_scored_subset.py](/home/chy/code/active/rl/scripts/select_grpo_scored_subset.py)
 
+当前已确认一个容易误判的实现细节：
+
+- 在 `Unsloth GRPO` 下，`max_steps = -1` 不是简单按 `样本数 / batch_size` 推导。
+- 若 `per_device_train_batch_size * gradient_accumulation_steps * world_size` 不是 `num_generations` 的整数倍，`Unsloth` 会先把有效 train batch size 改到 `num_generations`。
+- 随后 dataloader 的 prompt batch 又按 `train_batch_size * steps_per_generation / num_generations` 计算；在某些配置上会退化成“每个 step 只消费 1 个 prompt”。
+- 因此像 `3000` 条样本、`epochs = 1` 的 run，实际自动推导出的 `max_steps` 可能就是 `3000`，不能继续按普通 supervised trainer 的直觉估算。
+- 是否发生了这种重写，应以 `trainer_state.json` 中的 `train_batch_size` 与 `max_steps` 为准，而不是只看 yaml 原值。
+
 当前 reward 口径：
 
 - `correct_relaxed: +1.0`

@@ -1,0 +1,6 @@
+_base_: grpo_base.yaml
+train_dataset: data/grpo/train_grpo_merged_selected_3k.jsonl
+output_dir: outputs/grpo-qwen3-1.7b-full
+max_steps: -1
+save_steps: 30
+save_total_limit: 50

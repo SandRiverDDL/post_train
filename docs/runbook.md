@@ -152,6 +152,58 @@ just eval-test limit=20
 2. 若 early checkpoint 更好，则优先缩短单次训练窗口，而不是继续延长 step。
 3. 不要仅根据 final 一个点判断本轮 GRPO 是否有效。
 
+## GRPO Step 语义
+
+当前主线使用的是 `Unsloth GRPO`，这里的 `step` 不要按普通 trainer 直觉理解。
+
+约定：
+
+- `global_step` 表示一次参数更新，不是生成了多少条 completion
+- `max_steps = -1` 时，实际步数由 trainer 按 dataloader 长度自动推导
+- `num_generations` 会影响有效 train batch 的约束；如果 `batch_size * gradient_accumulation_steps * world_size` 不是 `num_generations` 的整数倍，`Unsloth` 可能改写有效 `train_batch_size`
+- 一旦发生这种改写，自动推导出的 `max_steps` 可能远大于直觉上的 `样本数 / batch_size`
+- 是否发生改写，以运行产物里的 `trainer_state.json` 为准，重点看：
+  - `train_batch_size`
+  - `max_steps`
+  - `num_train_epochs`
+
+经验建议：
+
+- 配置 `batch_size` 时，优先让它成为 `num_generations` 的整数倍
+- 不要仅凭 yaml 里的 `batch_size` 和 `max_steps=-1` 手算训练总步数
+- 真正开始训练后，先看一次 `checkpoint-10/trainer_state.json` 再决定 checkpoint 密度和总训练窗口
+
+## Big-Math 扩充
+
+先过滤外部候选：
+
+```bash
+.venv/bin/python scripts/filter_big_math_dataset.py \
+  --output data/grpo/big_math_quintile2_filtered.jsonl
+```
+
+再通过 manifest 合并并去重：
+
+```bash
+.venv/bin/python scripts/merge_train_corpora.py \
+  --manifest path/to/data_merge.yaml
+```
+
+最后按预算选择最终训练集：
+
+```bash
+.venv/bin/python scripts/select_merged_corpus.py \
+  --manifest path/to/data_merge.yaml
+```
+
+约定：
+
+- `filter_big_math_dataset.py` 当前固定面向 `open-r1/Big-Math-RL-Verified-Processed`
+- `quintile_2` 通过 `--config-name` 选择
+- `merge_train_corpora.py` 只生成 merge 后的去重 pool
+- `select_merged_corpus.py` 从 pool 中按 `selection.target_size` 和每源 `min_count/max_count` 选择最终训练集
+- 建议把 `data/eval/gsm8k_dev200.jsonl` 等冻结 eval 工件放进 manifest 的 `dedup_against`
+
 ## vLLM 说明
 
 - 默认 backend 是 `vllm`

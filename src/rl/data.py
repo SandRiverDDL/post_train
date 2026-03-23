@@ -44,6 +44,45 @@ COMPLETION_HEADER_PATTERNS = [
     re.compile(r"^\s*soln\.?\s*$", re.IGNORECASE),
 ]
 
+BIG_MATH_ALLOWED_SOURCES = {"orca_math", "big_math", "math"}
+BIG_MATH_EXCLUDED_SOURCES = {"aops_forum", "olympiads"}
+BIG_MATH_ALLOWED_DOMAINS = {
+    "applied mathematics",
+    "algebra",
+    "prealgebra",
+    "simple equations",
+    "equations and inequalities",
+}
+BIG_MATH_EXCLUDED_DOMAINS = {
+    "combinatorics",
+    "geometry",
+    "number theory",
+    "trigonometry",
+    "complex numbers",
+    "calculus",
+}
+BIG_MATH_PROOF_KEYWORDS = (
+    "prove",
+    "proof",
+    "show that",
+    "justify",
+    "explain why",
+    "derive",
+    "discussion",
+    "证明",
+    "说明",
+    "解释",
+    "推导",
+)
+BIG_MATH_BANNED_ANSWER_MARKERS = ("%", r"\cup", r"\cap", r"\infty", r"^\circ", r"\{", r"\}")
+LATEX_COMMAND_RE = re.compile(r"\\[A-Za-z]+")
+LATEX_DELIMITER_RE = re.compile(r"\\[\[\]\(\)]")
+INTERVAL_ANSWER_RE = re.compile(r"^[\(\[].+,.+[\)\]]$")
+INTEGER_RE = re.compile(r"^-?\d+$")
+DECIMAL_RE = re.compile(r"^-?\d+\.\d+$")
+SIMPLE_FRACTION_RE = re.compile(r"^-?\d+/\d+$")
+SHORT_EXPRESSION_RE = re.compile(r"^[0-9A-Za-z+\-*/(). ]+$")
+
 
 def scaled_category_targets(total_samples: int) -> dict[str, int]:
     base_total = sum(NUMINA_CATEGORY_TARGETS.values())
@@ -229,3 +268,66 @@ def format_protocol_prompt(question: str, *, prompt_version: str = "v1") -> str:
             "Solution:\n"
         )
     raise ValueError(f"不支持的 prompt_version: {prompt_version}")
+
+
+def count_latex_markers(text: str) -> int:
+    return len(LATEX_COMMAND_RE.findall(text)) + len(LATEX_DELIMITER_RE.findall(text))
+
+
+def looks_like_proof_prompt(question: str) -> bool:
+    lowered = question.lower()
+    return any(keyword in lowered for keyword in BIG_MATH_PROOF_KEYWORDS)
+
+
+def is_allowed_short_answer(answer: str) -> bool:
+    normalized = answer.strip()
+    if not normalized:
+        return False
+    if any(marker in normalized for marker in BIG_MATH_BANNED_ANSWER_MARKERS):
+        return False
+    if INTERVAL_ANSWER_RE.match(normalized):
+        return False
+    if INTEGER_RE.match(normalized):
+        return True
+    if DECIMAL_RE.match(normalized):
+        return True
+    if SIMPLE_FRACTION_RE.match(normalized):
+        return True
+    if len(normalized) > 16:
+        return False
+    if "=" in normalized or "," in normalized or ";" in normalized:
+        return False
+    return bool(SHORT_EXPRESSION_RE.match(normalized))
+
+
+def normalize_question_text(question: str) -> str:
+    normalized = question.strip().lower()
+    normalized = normalized.replace("“", '"').replace("”", '"').replace("’", "'").replace("‘", "'")
+    normalized = normalized.replace("–", "-").replace("—", "-")
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized
+
+
+def domain_paths_text(domains: Any) -> str:
+    if isinstance(domains, list):
+        return " | ".join(str(domain) for domain in domains)
+    return str(domains or "")
+
+
+def has_allowed_big_math_domain(domains: Any) -> bool:
+    lowered = domain_paths_text(domains).lower()
+    return any(keyword in lowered for keyword in BIG_MATH_ALLOWED_DOMAINS)
+
+
+def has_excluded_big_math_domain(domains: Any) -> bool:
+    lowered = domain_paths_text(domains).lower()
+    return any(keyword in lowered for keyword in BIG_MATH_EXCLUDED_DOMAINS)
+
+
+def select_middle_by_solve_rate(rows: list[dict[str, Any]], *, rate_key: str) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+    ordered = sorted(rows, key=lambda row: float(row[rate_key]))
+    lower_cut = int(len(ordered) * 0.2)
+    upper_cut = len(ordered) - lower_cut
+    return ordered[lower_cut:upper_cut]

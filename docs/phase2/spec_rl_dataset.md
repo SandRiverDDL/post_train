@@ -72,6 +72,26 @@ tiny 调试规则：
 - `scored`
 - `select`
 
+当需要引入外部候选源扩充训练集时，当前新增一条并行链路：
+
+- `filter_big_math_dataset.py`
+- `merge_train_corpora.py`
+- `select_merged_corpus.py`
+
+约定：
+
+- `filter_big_math_dataset.py` 当前只支持 `open-r1/Big-Math-RL-Verified-Processed`
+- `quintile_2` 通过 HF `config` 选择，不是样本字段
+- 过滤后先输出标准化 JSONL 工件，再在最终合并阶段统一去重
+- manifest YAML 当前同时声明：
+  - `inputs`
+  - `dedup_against`
+  - `merge_output`
+  - `selection`
+  - `final_output`
+- `merge_train_corpora.py` 只负责生成去重后的 pool 工件
+- `select_merged_corpus.py` 负责按 `target_size + per_source min/max + weight` 生成最终训练子集
+
 其中 `select_grpo_scored_subset.py` 默认输出全部满足阈值的样本；只有在显式传入 `target-size` 时，才会在过滤后的结果上继续做可选抽样。
 
 ## 中等难度筛选
@@ -106,3 +126,5 @@ tiny 调试规则：
 
 - v1 不追求覆盖最大难度
 - v1 不引入第二套独立 RL 数据格式
+- v1 不做模糊近似去重
+- v1 不做复杂语义级 proof / explanation 分类

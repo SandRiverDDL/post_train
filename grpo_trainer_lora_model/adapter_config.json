@@ -7,7 +7,7 @@
     "parent_library": "transformers.models.qwen3.modeling_qwen3",
     "unsloth_fixed": true
   },
-  "base_model_name_or_path": "/home/chy/.cache/huggingface/hub/models--Qwen--Qwen3-0.6B-Base/snapshots/da87bfb608c14b7cf20ba1ce41287e8de496c0cd",
+  "base_model_name_or_path": "/home/chy/.cache/huggingface/hub/models--unsloth--Qwen3-1.7B-Base-unsloth-bnb-4bit/snapshots/c7079ee9a92d69fbe9e6616dea1888bf0fb0bbca",
   "bias": "none",
   "corda_config": null,
   "ensure_weight_tying": false,
@@ -33,12 +33,12 @@
   "rank_pattern": {},
   "revision": null,
   "target_modules": [
+    "q_proj",
     "gate_proj",
-    "k_proj",
     "v_proj",
     "up_proj",
+    "k_proj",
     "o_proj",
-    "q_proj",
     "down_proj"
   ],
   "target_parameters": null,
