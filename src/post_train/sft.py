@@ -17,12 +17,9 @@ def _tokenize_prompt_completion(
     completion: str,
     max_length: int,
 ) -> dict[str, list[int]]:
-    prompt_ids = tokenizer(prompt, add_special_tokens=True)["input_ids"]
-    full_ids = tokenizer(prompt + completion, add_special_tokens=True)["input_ids"]
-    if full_ids[: len(prompt_ids)] != prompt_ids:
-        raise ValueError("prompt 与 prompt+completion 的 tokenizer 前缀不一致，无法构造 response-only labels。")
-
-    input_ids = full_ids[:max_length]
+    prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+    completion_ids = tokenizer(completion, add_special_tokens=False)["input_ids"]
+    input_ids = (prompt_ids + completion_ids)[:max_length]
     attention_mask = [1] * len(input_ids)
     labels = input_ids.copy()
     prompt_len = min(len(prompt_ids), len(input_ids))

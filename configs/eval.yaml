@@ -7,7 +7,10 @@ max_batch_size:
 max_new_tokens: 512
 max_seq_length: 1536
 device: cuda
+# VLLM
 gpu_memory_utilization: 0.70
+max_lora_rank: 32
+
 seed: 42
 tasks:
   - name: gsm8k

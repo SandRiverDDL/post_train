@@ -109,6 +109,7 @@ def resolve_model_args(
     device: str,
     attn_implementation: str,
     gpu_memory_utilization: float,
+    max_lora_rank: int | None = None,
 ) -> dict[str, Any]:
     target = requested_model or base_model
     if backend == "vllm":
@@ -121,6 +122,8 @@ def resolve_model_args(
         }
         if _looks_like_adapter_dir(target):
             model_args["lora_local_path"] = target
+            if max_lora_rank is not None:
+                model_args["max_lora_rank"] = max_lora_rank
         return model_args
 
     model_args = {

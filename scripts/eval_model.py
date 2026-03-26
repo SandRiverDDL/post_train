@@ -32,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backend", default=None, choices=("hf", "vllm"), help="覆盖评测后端")
     parser.add_argument("--batch-size", default=None, help="覆盖 batch size")
     parser.add_argument("--max-batch-size", default=None, help="覆盖 max batch size")
+    parser.add_argument("--max-lora-rank", default=None, help="覆盖 vLLM 的 max_lora_rank")
     parser.add_argument("--max-new-tokens", default=None, help="覆盖生成长度上限")
     parser.add_argument("--limit", type=int, default=None, help="只评测前 N 条")
     return parser.parse_args()
@@ -44,6 +45,7 @@ def main() -> None:
     backend = args.backend or cfg.backend
     batch_size = args.batch_size or cfg.batch_size
     max_batch_size = int(args.max_batch_size) if args.max_batch_size is not None else cfg.max_batch_size
+    max_lora_rank = int(args.max_lora_rank) if args.max_lora_rank is not None else cfg.max_lora_rank
     max_new_tokens = int(args.max_new_tokens) if args.max_new_tokens is not None else cfg.max_new_tokens
     tasks = resolve_eval_tasks(
         cfg,
@@ -59,6 +61,7 @@ def main() -> None:
         device=cfg.device,
         attn_implementation=cfg.attn_implementation,
         gpu_memory_utilization=cfg.gpu_memory_utilization,
+        max_lora_rank=max_lora_rank,
     )
     for task in tasks:
         harness_result = run_harness_eval(

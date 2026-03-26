@@ -42,6 +42,7 @@ class EvalConfig(BaseModel):
     device: str = "cuda"
     attn_implementation: str = "sdpa"
     gpu_memory_utilization: float = Field(default=0.7, gt=0.0, le=1.0)
+    max_lora_rank: int | None = Field(default=None, ge=1)
     seed: int = 42
 
     @model_validator(mode="after")

@@ -47,7 +47,9 @@
   --model outputs/stage1_sft \
   --tasks gsm8k \
   --batch-size 6 \
-  --max-new-tokens 256
+  --max-lora-rank 32 \
+  --max-new-tokens 512 \
+  --limit 200
 ```
 
 按单数据集临时覆盖：
@@ -58,6 +60,7 @@
   --model outputs/stage1_sft \
   --dataset data/eval/gsm8k_test.jsonl \
   --batch-size 6 \
+  --max-lora-rank 32 \
   --output outputs/eval_stage1_gsm8k.json
 ```
 
@@ -65,6 +68,7 @@
 
 - 数学生成型任务默认使用手动 `batch_size`
 - `max_batch_size` 只在显式使用 `batch_size=auto` 时才有意义
+- 评测 LoRA adapter 时，`max_lora_rank` 必须大于等于训练时的 `lora_rank`
 
 ## 5. 运行 stage2 SFT
 

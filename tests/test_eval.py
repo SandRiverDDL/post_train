@@ -16,6 +16,7 @@ from post_train.eval import (
     normalize_batch_settings,
     process_results_stub,
     rate_stderr,
+    resolve_model_args,
     resolve_eval_tasks,
     write_raw_eval_result,
 )
@@ -96,6 +97,7 @@ class EvalPipelineTest(unittest.TestCase):
                         "device: cuda",
                         "attn_implementation: sdpa",
                         "gpu_memory_utilization: 0.7",
+                        "max_lora_rank: 32",
                         "seed: 42",
                         "tasks:",
                         "  - name: gsm8k",
@@ -111,6 +113,7 @@ class EvalPipelineTest(unittest.TestCase):
         self.assertEqual(len(cfg.tasks), 2)
         self.assertEqual(cfg.tasks[0].name, "gsm8k")
         self.assertEqual(cfg.tasks[1].name, "math500")
+        self.assertEqual(cfg.max_lora_rank, 32)
 
     def test_resolve_eval_tasks_filters_requested_names(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -156,6 +159,27 @@ class EvalPipelineTest(unittest.TestCase):
 
         self.assertIsInstance(loaded["configs"]["gsm8k"]["doc_to_text"], str)
         self.assertEqual(loaded["samples"][0]["value"], "ok")
+
+    def test_resolve_model_args_passes_max_lora_rank_for_adapter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            adapter_dir = Path(tmp_dir) / "adapter"
+            adapter_dir.mkdir()
+            (adapter_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
+
+            model_args = resolve_model_args(
+                str(adapter_dir),
+                "Qwen/Qwen2.5-Math-1.5B",
+                backend="vllm",
+                max_length=1536,
+                device="cuda",
+                attn_implementation="sdpa",
+                gpu_memory_utilization=0.7,
+                max_lora_rank=32,
+            )
+
+        self.assertEqual(model_args["pretrained"], "Qwen/Qwen2.5-Math-1.5B")
+        self.assertEqual(model_args["lora_local_path"], str(adapter_dir))
+        self.assertEqual(model_args["max_lora_rank"], 32)
 
 
 if __name__ == "__main__":
