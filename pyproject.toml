@@ -1,7 +1,7 @@
 [project]
-name = "rl"
+name = "post-train"
 version = "0.1.0"
-description = "Qwen3 SFT + GRPO"
+description = "Two-stage SFT + SIMPO math post-training pipeline"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 

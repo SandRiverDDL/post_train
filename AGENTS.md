@@ -1,128 +1,82 @@
 # 项目名称
 
-Qwen3 数学后训练项目
+Qwen 数学后训练项目
 
 ## 语言规范
 
-始终使用中文回答与编写代码注释。
+- 始终使用中文回答。
+- 始终使用中文编写代码注释。
 
 ## 全局规则
 
-遵守同目录下的 `global_rules.md`。
+- 遵守同目录下的 `global_rules.md`。
 
 ## 开发环境
 
-* 优先使用 `.venv/bin/python` 运行和检查代码。
-* 若 `.venv` 不可用，使用 `uv run python`。
-* 除非用户明确要求，禁止重新安装依赖或重新创建环境。
+- 优先使用 `.venv/bin/python` 运行和检查代码。
+- 若 `.venv` 不可用，使用 `uv run python`。
+- 除非用户明确要求，禁止重建环境或重新安装依赖。
 
-## 项目目标
+## 文档分工
 
-实现一个完整的 LLM 数学后训练流程。当前阶段只实现最小可运行闭环：
+- `AGENTS.md`：稳定规则，只放长期约束。
+- `docs/SPEC.md`：当前阶段设计，只放本阶段目标、边界与口径。
+- `docs/ARCHITECTURE.md`：系统分层、主链路与模块职责。
+- `docs/STATE.md`：当前有效基线、已知问题、下一步重点。
 
-1. SFT
-2. Benchmark 评测
-3. 后续再接 GRPO
+## 文档优先级
 
-优先建立**可信、可运行、可扩展的工程基线**，再逐步扩大规模。
+- 稳定规则以 `AGENTS.md` 为准。
+- 当前阶段设计以 `docs/SPEC.md` 为准。
+- 结构分层以 `docs/ARCHITECTURE.md` 为准。
+- 当前状态以 `docs/STATE.md` 为准。
+- 若文档与实现冲突，优先修正文档并说明原因。
 
-## 模型策略
+## 代码组织规则
 
-* 开发模型：`Qwen/Qwen3-1.7B-Base`
-* 最终实验模型：`Qwen/Qwen3-4B-Base`
+- `scripts/` 只允许放编排入口、参数解析、日志打印。
+- `src/<package>/` 放训练、评测、数据处理、schema 与工具逻辑。
+- 严禁把核心业务逻辑直接堆进 `scripts/`。
+- 共享逻辑只保留一份实现，禁止平行复制。
 
-开发阶段优先使用 1.7B，以保证调试速度和迭代效率。
+## 训练与评测规则
 
-## 数据与评测基线
+- 统一尾部答案格式要求：必须包含 `\boxed{...}`。
+- 答案提取与等价判定统一使用本地 parser + `math-verify`。
+- 正式评测入口统一为 `scripts/eval_model.py`。
+- 若旧实现与当前目标冲突，优先删除或替换，不为兼容而保留。
 
-* `train`：`nlile/NuminaMath-1.5-RL-Verifiable`
-* `dev`：`gsm8k`（固定 200 条）
-* `test`：`HuggingFaceH4/MATH-500`（全量）
+## 测试与验证规则
 
-约束：
+- parser、`math-verify` 包装、数据 schema、评测统计必须可测试。
+- 数据准备、SFT 训练、SIMPO 训练、评测编排至少要有最小 smoke test 或 contract test。
+- 没有新鲜验证证据时，禁止声称链路可用、修复完成或结果可信。
+- 若改动影响训练、评测或数据格式，必须同步更新文档与相关测试。
 
-1. `train` 与 `dev` 可以进行长度过滤。
-2. `test` 不允许按长度裁剪，只允许字段映射和格式标准化。
-3. NuminaMath 训练集按 `problem_type` 分层采样，优先使用原始 `answer` 字段作为最终答案。
+## 安全规则
 
-## 输出格式
-
-训练、开发和评测数据统一使用尾部格式：
-
-```
-Final answer: \boxed{...}
-```
-
-该格式同时用于：
-
-* GRPO reward 解析
-* strict eval
-
-## 必跑检查
-
-数据准备完成后必须运行：
-
-```bash
-python scripts/check_sft_data.py
-```
-
-期望指标：
-
-* `empty_final_answer = 0`
-* `boxed_rate ≈ 1.0`
-* `parse_success_rate ≈ 1.0`
-* `consistent_rate ≈ 1.0`
-
-若不满足，必须先修复数据再继续训练。
-
-## 评测约定
-
-正式评测入口：
-
-```
-scripts/eval_dataset.py
-```
-
-规则：
-
-1. 正式结果使用 **strict boxed 协议**。
-2. `GSM8K dev200` 与 `MATH500 test` 统一通过该入口评测，通过 `--dataset` 区分。
-3. 正式主评测链路使用本地 prompt + `math-verify` 做答案提取与等价判定；`lm-evaluation-harness` 仅保留为可选 benchmark / 对照模式，不作为当前 Phase 2 正式结论来源。
-4. `data/eval/gsm8k_dev200.jsonl` 一旦确认可用即视为**冻结工件**，不得因 tokenizer 或长度配置变化重新生成。
-5. LoRA / SFT 模型在进入 GRPO 前，必须在 `data/train_sft.jsonl` 上完成工程验收，至少检查：
-
-   * `format_success`
-   * `parse_success`
-   * `normalized_accuracy`
-
-   以确保 reward 解析链路稳定。
-
-## 项目结构
-
-```
-configs/
-scripts/
-src/
-docs/
-data/
-tests/
-```
-
-* `scripts/`：训练、数据准备、评测入口
-* `src/rl/`：配置、数据处理、答案解析、评测集成
-* `docs/`：阶段设计文档
-* `tests/`：最小单元测试
-
-## Codex 工作规则
-
-1. 优先保证当前阶段的**最小可运行闭环**，不要提前实现未来阶段功能。
-2. 文档必须与当前实现保持一致。
+- 除非用户明确要求，禁止删除数据文件、下载大模型、下载大数据集。
+- 除非用户明确要求，禁止做与当前任务无关的重构。
+- 发现旧代码与当前目标冲突时，可以直接删除，但不得回滚用户自己的未提交修改。
 
 ## 完成定义
 
 一次实现变更只有在满足以下条件时才算完成：
 
-1. 代码、配置与文档口径一致。
+1. 代码、配置、脚本与文档口径一致。
 2. 已运行相关最小验证命令并记录结果。
-3. 未引入重复实现（duplicate logic）。
-4. 若改动影响训练或评测链路，必须更新相关说明文档。
+3. `scripts/` 未承载核心业务逻辑。
+4. 未引入重复实现。
+
+## Superpowers 约定
+
+本项目默认禁用大多数 superpowers workflow。
+
+默认仅允许以下 skill：
+- `verification-before-completion`
+- `systematic-debugging`
+- `requesting-code-review`
+
+其余 skill 默认不使用，除非用户明确要求。
+若 skill 规则与本项目工作方式冲突，以本文件为准。
+

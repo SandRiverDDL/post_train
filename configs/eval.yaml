@@ -1,9 +1,16 @@
-model_name: /home/chy/.cache/huggingface/hub/models--Qwen--Qwen3-1.7B-Base/snapshots/ea980cb0a6c2ae4b936e82123acc929f1cec04c1
-eval_dataset: data/eval/gsm8k_dev200.jsonl
-test_dataset: data/eval/math500_test.jsonl
-
-max_seq_length: 1024
-eval_max_new_tokens: 512
-eval_backend: vllm
-eval_attn_implementation: sdpa
-eval_gpu_memory_utilization: 0.7
+model_name: Qwen/Qwen2.5-Math-1.5B
+output_dir: outputs/eval
+backend: vllm
+attn_implementation: sdpa
+batch_size: 6
+max_batch_size:
+max_new_tokens: 512
+max_seq_length: 1536
+device: cuda
+gpu_memory_utilization: 0.70
+seed: 42
+tasks:
+  - name: gsm8k
+    dataset_path: data/eval/gsm8k_test.jsonl
+  - name: math500
+    dataset_path: data/eval/math500_test.jsonl

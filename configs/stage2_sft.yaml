@@ -1,0 +1,14 @@
+model_name: outputs/stage1_sft
+train_dataset: data/stage2_train.jsonl
+output_dir: outputs/stage2_sft
+seed: 42
+max_seq_length: 1024
+learning_rate: 1.0e-4
+epochs: 1
+batch_size: 4
+gradient_accumulation_steps: 4
+lora_rank: 32
+lora_alpha: 32
+lora_dropout: 0.0
+warmup_ratio: 0.03
+weight_decay: 0.01

@@ -1,5 +1,0 @@
-_base_: sft.yaml
-
-model_name: /home/chy/.cache/huggingface/hub/models--Qwen--Qwen3-0.6B-Base/snapshots/da87bfb608c14b7cf20ba1ce41287e8de496c0cd
-output_dir: outputs/sft-qwen3-0.6b-v2
-prompt_version: v2

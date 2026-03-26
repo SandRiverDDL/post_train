@@ -1,6 +1,0 @@
-_base_: grpo_base.yaml
-
-base_model_name: Qwen/Qwen3-0.6B-Base
-cold_start_model: outputs/sft-qwen3-0.6b-v2
-output_dir: outputs/grpo-qwen3-0.6b-v2
-prompt_version: v2

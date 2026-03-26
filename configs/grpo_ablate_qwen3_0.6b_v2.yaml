@@ -1,6 +1,0 @@
-_base_: grpo_base_qwen3_0.6b_v2.yaml
-
-output_dir: outputs/grpo-qwen3-0.6b-ablate-v2
-max_steps: 50
-save_steps: 25
-save_total_limit: 4
