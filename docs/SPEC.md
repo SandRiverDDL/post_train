@@ -21,25 +21,45 @@
 - 当前数据口径：`UWNSL/MATH_training_split_short_cot`
 - 当前首版训练规模：`2000`
 - `dev`：从同源数据中切出 `200` 条并冻结
+- 当前 checkpoint 选择口径：`2 epoch`、`save_steps=25`、训练结束后统一在 `dev200` 上按 `normalized_accuracy` 选 best checkpoint
 
 ### Stage2 SFT
 
 - 定义为“在另一份 SFT 数据上继续训练一次”。
-- 当前不把它绑定到自蒸馏、错题重采样或固定外部数据源。
-- 后续可以把题目选择、轨迹选择、数据生成方式接入这一阶段。
+- 当前绑定到一条“清洗与筛选”数据管线，而不是模型采样管线。
+- 当前主数据源：`qingy2024/OpenR1-Math-220k-Cleaned`
+- 当前 MVP 配比：`20%` 随机 `stage1_train` + `60%` `math220k_short(<768)` + `20%` `math220k_long(<1380)`
+- 当前 `math220k` 绑定规则：
+  - 优先使用 `clean_problem`
+  - `question_type == "MCQ"` 直接过滤
+  - 尾部标准化为单个 canonical `\boxed{...}`，避免重复 boxed
+- 后续可以把去重、去污染、多数据集配额控制接入这一阶段。
 
 ### SIMPO
 
 - 当前使用 `TRL`。
 - 当前训练器口径：`CPOTrainer(loss_type="simpo")`
-- 当前只要求能消费已有 preference 数据并完成训练闭环。
-- preference 数据如何构造不在本阶段写死。
+- 当前 MVP 数据构造口径：
+  - 以 `stage1 best checkpoint` 为采样模型
+  - 从 `stage1` 同源但未用题目中抽 `800` 条 query
+  - 每题采样 `4` 个 responses
+  - 优先构造 `correct > incorrect`，不足时回退到 `correct > correct`
+  - 目标 `500` 对 pair，但不足不报错
+  - 会额外从 full pair 中固定抽出 `150` 对 `pilot` 子集
+- 当前默认训练口径：
+  - `TRL CPOTrainer(loss_type="simpo")`
+  - `4bit + PEFT`
+  - `beta=2.0`、`gamma=1.0`
+  - 支持 step checkpoint 与 resume
 
 ## 当前模型与评测口径
 
 - 开发模型：`Qwen/Qwen2.5-Math-1.5B`
 - 正式 benchmark：`GSM8K`、`MATH-500`
-- 正式评测方式：`lm-eval-harness` 负责编排推理，本地 parser + `math-verify` 负责提取与等价判定
+- 正式评测支持两条链路：
+  - `vllm_raw`：直接用 `vLLM` 生成，本地 parser + `math-verify` 判定
+  - `lm_eval`：`lm-eval-harness` 负责编排推理，本地 parser + `math-verify` 判定
+- 当前默认评测链路：`vllm_raw`
 
 当前核心指标：
 

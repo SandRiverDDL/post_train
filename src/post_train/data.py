@@ -128,6 +128,20 @@ def split_train_dev(
     return train_rows, dev_rows
 
 
+def sample_rows(
+    rows: Iterable[dict[str, Any]],
+    *,
+    sample_size: int,
+    seed: int,
+) -> list[dict[str, Any]]:
+    records = list(rows)
+    if sample_size > len(records):
+        raise ValueError(f"样本不足：需要 {sample_size} 条，实际只有 {len(records)} 条。")
+    sampled = list(records)
+    random.Random(seed).shuffle(sampled)
+    return sampled[:sample_size]
+
+
 def summarize_sft_dataset(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     records = list(rows)
     total = len(records)
@@ -202,6 +216,26 @@ def prepare_benchmark_artifact(
 ) -> list[dict[str, Any]]:
     rows = load_dataset_rows(dataset_name, split=split, config_name=config_name, cache_dir=cache_dir)
     return [make_eval_record(row, index, source=source) for index, row in enumerate(rows)]
+
+
+def prepare_sampled_eval_artifact(
+    *,
+    dataset_name: str,
+    split: str,
+    source: str,
+    sample_size: int,
+    seed: int,
+    config_name: str | None = None,
+    cache_dir: str | None = None,
+) -> list[dict[str, Any]]:
+    rows = prepare_benchmark_artifact(
+        dataset_name=dataset_name,
+        split=split,
+        source=source,
+        config_name=config_name,
+        cache_dir=cache_dir,
+    )
+    return sample_rows(rows, sample_size=sample_size, seed=seed)
 
 
 def preview_rows(rows: Iterable[dict[str, Any]], *, count: int = 3) -> str:

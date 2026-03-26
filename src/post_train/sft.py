@@ -29,6 +29,7 @@ def _tokenize_prompt_completion(
         "input_ids": input_ids,
         "attention_mask": attention_mask,
         "labels": labels,
+        "length": len(input_ids),
     }
 
 
@@ -103,13 +104,17 @@ def train_sft(cfg) -> Path:
         num_train_epochs=cfg.epochs,
         warmup_ratio=cfg.warmup_ratio,
         weight_decay=cfg.weight_decay,
-        logging_steps=1,
-        save_strategy="epoch",
+        logging_steps=cfg.logging_steps,
         seed=cfg.seed,
         report_to="none",
         max_length=cfg.max_seq_length,
         eos_token=tokenizer.eos_token,
         pad_token=tokenizer.pad_token,
+        group_by_length=cfg.group_by_length,
+        length_column_name="length",
+        save_strategy=cfg.save_strategy,
+        save_steps=cfg.save_steps,
+        save_total_limit=cfg.save_total_limit,
     )
 
     trainer = SFTTrainer(

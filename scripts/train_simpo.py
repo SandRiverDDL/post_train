@@ -15,12 +15,15 @@ from post_train.simpo import train_simpo
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="运行 TRL SimPO 训练。")
     parser.add_argument("--config", required=True, help="SimPO 配置文件路径")
+    parser.add_argument("--resume-from-checkpoint", help="从已有 checkpoint 继续训练")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     cfg = load_simpo_config(args.config)
+    if args.resume_from_checkpoint:
+        cfg = cfg.model_copy(update={"resume_from_checkpoint": args.resume_from_checkpoint})
     output_dir = train_simpo(cfg)
     print(f"saved_model={output_dir}")
 

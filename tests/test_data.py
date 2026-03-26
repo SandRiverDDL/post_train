@@ -3,11 +3,18 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from post_train.data import make_sft_record, split_train_dev, summarize_sft_dataset
+from post_train.data import (
+    make_sft_record,
+    prepare_sampled_eval_artifact,
+    sample_rows,
+    split_train_dev,
+    summarize_sft_dataset,
+)
 
 
 class DataPipelineTest(unittest.TestCase):
@@ -40,6 +47,30 @@ class DataPipelineTest(unittest.TestCase):
         self.assertEqual(len(dev_rows), 2)
         self.assertEqual([row["id"] for row in train_rows], ["8", "3", "1", "4", "7", "0"])
         self.assertEqual([row["id"] for row in dev_rows], ["9", "6"])
+
+    def test_sample_rows_is_deterministic(self) -> None:
+        rows = [{"id": str(index)} for index in range(6)]
+        sampled = sample_rows(rows, sample_size=3, seed=7)
+        self.assertEqual([row["id"] for row in sampled], ["4", "0", "5"])
+
+    def test_prepare_sampled_eval_artifact_builds_eval_rows(self) -> None:
+        raw_rows = [
+            {"problem": "1+1=?", "answer": "2"},
+            {"problem": "2+2=?", "answer": "4"},
+            {"problem": "3+3=?", "answer": "6"},
+        ]
+        with patch("post_train.data.load_dataset_rows", return_value=raw_rows):
+            rows = prepare_sampled_eval_artifact(
+                dataset_name="toy",
+                split="test",
+                source="toy",
+                sample_size=2,
+                seed=5,
+            )
+        self.assertEqual(len(rows), 2)
+        self.assertIn("question", rows[0])
+        self.assertIn("final_answer", rows[0])
+        self.assertEqual(rows[0]["meta"]["source"], "toy")
 
     def test_summarize_sft_dataset_counts_metrics(self) -> None:
         rows = [

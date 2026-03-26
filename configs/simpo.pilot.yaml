@@ -1,21 +1,21 @@
 base_model_name: /home/chy/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
 model_name_or_path: outputs/stage1_sft/checkpoint-50
-train_dataset: data/simpo/train.jsonl
-output_dir: outputs/simpo
+train_dataset: data/simpo/train.pilot.jsonl
+output_dir: outputs/simpo_pilot
 seed: 42
 max_length: 768
 max_prompt_length: 256
 max_completion_length: 256
 learning_rate: 5.0e-7
 epochs: 1
-batch_size: 1
-gradient_accumulation_steps: 8
+batch_size: 2
+gradient_accumulation_steps: 4
 warmup_ratio: 0.1
 weight_decay: 0.01
 logging_steps: 5
 save_strategy: steps
-save_steps: 10
-save_total_limit: 10
+save_steps: 25
+save_total_limit: 3
 resume_from_checkpoint:
 beta: 2.0
 simpo_gamma: 1.0

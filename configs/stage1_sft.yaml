@@ -4,11 +4,18 @@ output_dir: outputs/stage1_sft
 seed: 42
 max_seq_length: 1536
 learning_rate: 1.0e-4
-epochs: 1
-batch_size: 4
-gradient_accumulation_steps: 4
-lora_rank: 32
+
+epochs: 2
+batch_size: 32
+gradient_accumulation_steps: 1
+lora_rank: 16
 lora_alpha: 32
 lora_dropout: 0.0
 warmup_ratio: 0.03
 weight_decay: 0.01
+logging_steps: 5
+group_by_length: true
+
+save_strategy: steps
+save_steps: 25
+save_total_limit: 12

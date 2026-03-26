@@ -6,6 +6,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -18,6 +20,9 @@ from post_train.eval import (
     rate_stderr,
     resolve_model_args,
     resolve_eval_tasks,
+    resolve_task_output_paths,
+    result_from_vllm_raw_logs,
+    run_vllm_raw_eval,
     write_raw_eval_result,
 )
 
@@ -89,6 +94,7 @@ class EvalPipelineTest(unittest.TestCase):
                     [
                         "model_name: Qwen/Qwen2.5-Math-1.5B",
                         "output_dir: outputs/eval",
+                        "runner: vllm_raw",
                         "backend: vllm",
                         "batch_size: auto",
                         "max_batch_size: 8",
@@ -111,6 +117,7 @@ class EvalPipelineTest(unittest.TestCase):
             cfg = load_eval_config(config_path)
 
         self.assertEqual(len(cfg.tasks), 2)
+        self.assertEqual(cfg.runner, "vllm_raw")
         self.assertEqual(cfg.tasks[0].name, "gsm8k")
         self.assertEqual(cfg.tasks[1].name, "math500")
         self.assertEqual(cfg.max_lora_rank, 32)
@@ -180,6 +187,119 @@ class EvalPipelineTest(unittest.TestCase):
         self.assertEqual(model_args["pretrained"], "Qwen/Qwen2.5-Math-1.5B")
         self.assertEqual(model_args["lora_local_path"], str(adapter_dir))
         self.assertEqual(model_args["max_lora_rank"], 32)
+
+    def test_result_from_vllm_raw_logs_matches_current_result_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dataset_path = Path(tmp_dir) / "toy.jsonl"
+            dataset_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"id": "1", "question": "1+1=?", "final_answer": "2"}, ensure_ascii=False),
+                        json.dumps({"id": "2", "question": "2+2=?", "final_answer": "4"}, ensure_ascii=False),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            raw_result = {
+                "runner": "vllm_raw",
+                "samples": {
+                    "toy": [
+                        {"resps": ["\\boxed{2}"]},
+                        {"resps": ["not parsed"]},
+                    ]
+                },
+                "timing": {"total_seconds": 2.0},
+            }
+
+            result = result_from_vllm_raw_logs(
+                raw_result,
+                task_name="toy",
+                dataset_path=dataset_path,
+                model_name="outputs/demo",
+            )
+
+        self.assertEqual(result["metrics"]["runner"], "vllm_raw")
+        self.assertEqual(result["metrics"]["samples"], 2)
+        self.assertEqual(result["metrics"]["boxed_rate"], 0.5)
+        self.assertEqual(result["metrics"]["samples_per_second"], 1.0)
+        self.assertEqual(len(result["predictions"]), 2)
+
+    def test_resolve_task_output_paths_adds_runner_suffix(self) -> None:
+        task = type("Task", (), {"name": "gsm8k", "output_path": None, "raw_output_path": None})()
+        final_output, raw_output = resolve_task_output_paths(task, output_dir=Path("outputs/eval"), runner="vllm_raw")
+        self.assertEqual(final_output, Path("outputs/eval/gsm8k.vllm_raw.json"))
+        self.assertEqual(raw_output, Path("outputs/eval/gsm8k.vllm_raw.raw.json"))
+
+    def test_run_vllm_raw_eval_calls_generate_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dataset_path = Path(tmp_dir) / "toy.jsonl"
+            dataset_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"id": "1", "question": "1+1=?", "final_answer": "2"}, ensure_ascii=False),
+                        json.dumps({"id": "2", "question": "2+2=?", "final_answer": "4"}, ensure_ascii=False),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            calls: list[dict[str, object]] = []
+
+            class FakeLLM:
+                def __init__(self, **kwargs) -> None:
+                    self.kwargs = kwargs
+
+                def generate(self, prompts, sampling_params=None, use_tqdm=False, lora_request=None):
+                    calls.append(
+                        {
+                            "prompt_count": len(prompts),
+                            "use_tqdm": use_tqdm,
+                            "lora_request": lora_request,
+                        }
+                    )
+                    return [
+                        SimpleNamespace(outputs=[SimpleNamespace(text="\\boxed{2}")]),
+                        SimpleNamespace(outputs=[SimpleNamespace(text="\\boxed{4}")]),
+                    ]
+
+            class FakeSamplingParams:
+                def __init__(self, **kwargs) -> None:
+                    self.kwargs = kwargs
+
+            fake_vllm = ModuleType("vllm")
+            fake_vllm.LLM = FakeLLM
+            fake_vllm.SamplingParams = FakeSamplingParams
+            fake_lora_request_module = ModuleType("vllm.lora.request")
+            fake_lora_request_module.LoRARequest = lambda *args, **kwargs: {"args": args, "kwargs": kwargs}
+
+            with patch.dict(
+                sys.modules,
+                {
+                    "vllm": fake_vllm,
+                    "vllm.lora.request": fake_lora_request_module,
+                },
+            ):
+                result = run_vllm_raw_eval(
+                    model_args={
+                        "pretrained": "Qwen/Qwen2.5-Math-1.5B",
+                        "dtype": "auto",
+                        "trust_remote_code": True,
+                        "max_length": 1536,
+                        "gpu_memory_utilization": 0.7,
+                    },
+                    dataset_path=dataset_path,
+                    task_name="toy",
+                    batch_size=1,
+                    limit=None,
+                    max_gen_toks=128,
+                )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["prompt_count"], 2)
+        self.assertEqual(result["runner"], "vllm_raw")
+        self.assertEqual(len(result["samples"]["toy"]), 2)
 
 
 if __name__ == "__main__":

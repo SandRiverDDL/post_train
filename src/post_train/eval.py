@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from inspect import getsource
 from pathlib import Path
 from typing import Any, Iterable
@@ -36,6 +37,8 @@ def build_eval_result(
     *,
     model_name: str,
     dataset_name: str,
+    runner: str | None = None,
+    total_seconds: float | None = None,
 ) -> dict[str, Any]:
     row_list = list(rows)
     generation_list = list(generations)
@@ -82,6 +85,7 @@ def build_eval_result(
         "metrics": {
             "model": model_name,
             "dataset": dataset_name,
+            "runner": runner or "",
             "samples": sample_count,
             "boxed_rate": boxed_rate,
             "boxed_rate_stderr": rate_stderr(boxed_rate, sample_count),
@@ -90,6 +94,8 @@ def build_eval_result(
             "normalized_accuracy": normalized_accuracy,
             "normalized_accuracy_stderr": rate_stderr(normalized_accuracy, sample_count),
             "avg_output_tokens": avg_output_tokens,
+            "total_seconds": total_seconds or 0.0,
+            "samples_per_second": (sample_count / total_seconds) if total_seconds and total_seconds > 0 else 0.0,
         },
         "predictions": predictions,
     }
@@ -197,7 +203,8 @@ def run_harness_eval(
         "yaml_path": str(dataset_path),
         "task": None,
     }
-    return simple_evaluate(
+    started_at = time.perf_counter()
+    result = simple_evaluate(
         model=backend,
         model_args=model_args,
         tasks=[build_local_task(dataset_path, task_name=task_name)],
@@ -209,6 +216,82 @@ def run_harness_eval(
         num_fewshot=0,
         gen_kwargs={"max_gen_toks": max_gen_toks, "do_sample": False},
     )
+    result["timing"] = {"total_seconds": time.perf_counter() - started_at}
+    result["runner"] = "lm_eval"
+    return result
+
+
+def run_vllm_raw_eval(
+    *,
+    model_args: dict[str, Any],
+    dataset_path: str | Path,
+    task_name: str,
+    batch_size: int | str,
+    limit: int | None,
+    max_gen_toks: int,
+) -> dict[str, Any]:
+    from vllm import LLM, SamplingParams
+    from vllm.lora.request import LoRARequest
+
+    if batch_size == "auto":
+        raise ValueError("vllm_raw runner 不支持 batch_size=auto，请显式传整数 batch_size。")
+
+    rows = read_jsonl(dataset_path)
+    if limit is not None:
+        rows = rows[:limit]
+
+    prompts = [build_eval_prompt(str(row["question"])) for row in rows]
+    llm_kwargs = dict(model_args)
+    model_name = str(llm_kwargs.pop("pretrained"))
+    max_length = llm_kwargs.pop("max_length", None)
+    lora_path = llm_kwargs.pop("lora_local_path", None)
+    max_lora_rank = llm_kwargs.pop("max_lora_rank", None)
+    if max_length is not None:
+        llm_kwargs["max_model_len"] = max_length
+    if lora_path is not None:
+        llm_kwargs["enable_lora"] = True
+    if max_lora_rank is not None:
+        llm_kwargs["max_lora_rank"] = max_lora_rank
+
+    llm = LLM(model=model_name, **llm_kwargs)
+    sampling_params = SamplingParams(
+        n=1,
+        temperature=0.0,
+        max_tokens=max_gen_toks,
+        stop=["</s>", "<|im_end|>"],
+    )
+    lora_request = None
+    if lora_path is not None:
+        lora_request = LoRARequest("eval_adapter", 1, lora_path)
+
+    started_at = time.perf_counter()
+    outputs = llm.generate(
+        prompts,
+        sampling_params=sampling_params,
+        use_tqdm=False,
+        lora_request=lora_request,
+    )
+    total_seconds = time.perf_counter() - started_at
+
+    samples: list[dict[str, Any]] = []
+    for row, prompt, output in zip(rows, prompts, outputs, strict=True):
+        generations = [candidate.text for candidate in output.outputs]
+        samples.append(
+            {
+                "id": str(row.get("id", "")),
+                "doc": row,
+                "prompt": prompt,
+                "resps": generations,
+                "metrics": ["raw_count"],
+            }
+        )
+
+    return {
+        "runner": "vllm_raw",
+        "task_name": task_name,
+        "samples": {task_name: samples},
+        "timing": {"total_seconds": total_seconds},
+    }
 
 
 def _extract_generation(sample: dict[str, Any]) -> str:
@@ -239,7 +322,36 @@ def result_from_harness_logs(
     rows = read_jsonl(dataset_path)
     samples = harness_result.get("samples", {}).get(task_name, [])
     generations = [_extract_generation(sample) for sample in samples]
-    return build_eval_result(rows[: len(generations)], generations, model_name=model_name, dataset_name=str(dataset_path))
+    total_seconds = float(harness_result.get("timing", {}).get("total_seconds", 0.0))
+    return build_eval_result(
+        rows[: len(generations)],
+        generations,
+        model_name=model_name,
+        dataset_name=str(dataset_path),
+        runner=str(harness_result.get("runner", "lm_eval")),
+        total_seconds=total_seconds,
+    )
+
+
+def result_from_vllm_raw_logs(
+    raw_result: dict[str, Any],
+    *,
+    task_name: str,
+    dataset_path: str | Path,
+    model_name: str,
+) -> dict[str, Any]:
+    rows = read_jsonl(dataset_path)
+    samples = raw_result.get("samples", {}).get(task_name, [])
+    generations = [str(sample.get("resps", [""])[0] if sample.get("resps") else "") for sample in samples]
+    total_seconds = float(raw_result.get("timing", {}).get("total_seconds", 0.0))
+    return build_eval_result(
+        rows[: len(generations)],
+        generations,
+        model_name=model_name,
+        dataset_name=str(dataset_path),
+        runner=str(raw_result.get("runner", "vllm_raw")),
+        total_seconds=total_seconds,
+    )
 
 
 def preview_logged_samples(result: dict[str, Any], *, count: int = 3) -> str:
@@ -320,7 +432,10 @@ def resolve_eval_tasks(
     return tasks
 
 
-def resolve_task_output_paths(task: EvalTaskConfig, *, output_dir: Path) -> tuple[Path, Path]:
-    final_output = task.output_path or (output_dir / f"{task.name}.json")
+def resolve_task_output_paths(task: EvalTaskConfig, *, output_dir: Path, runner: str) -> tuple[Path, Path]:
+    default_output = output_dir / f"{task.name}.{runner}.json"
+    final_output = task.output_path or default_output
+    if task.output_path is not None and final_output.suffix == ".json":
+        final_output = final_output.with_name(f"{final_output.stem}.{runner}.json")
     raw_output = task.raw_output_path or final_output.with_suffix(".raw.json")
     return final_output, raw_output

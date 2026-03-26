@@ -1,0 +1,19 @@
+stage1_input: data/stage1_train.jsonl
+math220k_dataset: qingy2024/OpenR1-Math-220k-Cleaned
+math220k_split: train
+output_path: data/stage2_train.jsonl
+report_path: data/stage2_train.report.json
+intermediate_dir: outputs/stage2_data
+tokenizer_name: /home/chy/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
+seed: 42
+total_size: 2000
+stage1_random_quota: 1000
+math220k_short_quota: 700
+math220k_long_quota: 300
+short_max_tokens: 768
+long_max_tokens: 1380
+cache_dir:
+save_intermediate: false
+exact_dedup: false
+near_dedup: false
+decontam: false

@@ -51,12 +51,29 @@
   - 数据清洗
   - 数据导出
   - 数据校验
+- `stage2_data.py`
+  - source-specific filters
+  - generic filters
+  - 尾部标准化为单个 canonical boxed
+  - token 长度分桶
+  - 按配额混采 stage2 数据
 - `sft.py`
   - stage1 / stage2 SFT 共用训练逻辑
+- `sft_selection.py`
+  - checkpoint 扫描
+  - dev 批量评测
+  - best checkpoint 选择
 - `simpo.py`
   - TRL `CPOTrainer(loss_type=simpo)` 封装
+  - 4bit + PEFT 加载
+  - checkpoint / resume 编排
+- `simpo_data.py`
+  - query 池构造
+  - 多 response 采样
+  - pair 构造与报告
+  - pilot 子集导出
 - `eval.py`
-  - `lm-eval-harness` 编排
+  - `vllm_raw` / `lm_eval` 多 runner 编排
   - 模型输出后处理
   - `math-verify` 判定与指标汇总
 
@@ -88,7 +105,7 @@
 
 输入：
 
-- 另一份 SFT JSONL
+- 清洗与筛选后的 stage2 SFT JSONL
 - `stage1` 模型或 adapter
 
 输出：
@@ -98,8 +115,12 @@
 
 说明：
 
-- 当前只定义为“第二次 SFT”
-- 不把数据来源写死为自蒸馏或外部数据集
+- 当前数据构造流程：
+  - source-specific filter
+  - generic validation
+  - token 长度分桶
+  - 多 pool 按配额混采
+- 当前主数据源固定为 `OpenR1-Math-220k-Cleaned` 与 `stage1_train`
 
 ### 3. SIMPO
 
@@ -115,7 +136,11 @@
 
 流程：
 
-preference JSONL
+query pool
+-> 多 response 采样
+-> pair 构造
+-> preference JSONL
+-> pilot preference JSONL
 -> schema 校验
 -> `TRL CPOTrainer(loss_type=simpo)`
 -> 模型导出
@@ -127,8 +152,9 @@ preference JSONL
 
 职责划分：
 
-1. `lm-eval-harness`
-   - 负责样本遍历、推理编排、原始输出收集
+1. 生成 runner
+   - `vllm_raw` 直接调用 `vLLM`
+   - `lm_eval` 通过 `lm-eval-harness` 编排
 2. 本地后处理
    - 提取最终答案
    - 调用 `math-verify`
