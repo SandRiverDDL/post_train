@@ -16,19 +16,21 @@
 
 1. 还缺少目标机器上的真实训练验证。
 2. `stage2` 的去重与去污染仍未纳入 MVP。
-3. `stage2` 的真实收益仍未被稳定验证，当前优先先消除格式漂移带来的噪声。
+3. `stage2` 的真实收益仍未被稳定验证；当前观测到它更贴近 `math220k`，但可能伤害 `GSM8K` transfer。
 4. `SIMPO` 已有 MVP 数据构造链路，但尚未在目标机器上完成真实采样与训练验证。
 5. `SIMPO` 当前训练成本仍高，当前优先验证 4bit + pilot + resume 是否能显著降本。
 6. 远程数据下载在当前环境里不稳定。
+7. `stage2` target dev 的 profile 构造链路刚建立，仍需在目标机器上实际生成并验证。
 
 ## 当前优先级
 
 1. 在目标机器上验证 `stage1` 数据准备、训练、评测链路。
 2. 重新生成 `stage2` 数据并确认 report 中不存在双 boxed 尾部。
-3. 在目标机器上验证 `stage2` 清洗与筛选管线。
-4. 在目标机器上验证 `prepare_simpo_data -> train_simpo` 链路。
-5. 在目标机器上验证 `SIMPO` 的 pilot/full 两档训练与 resume。
-6. 基于真实实验结果继续收紧 `SPEC` 与配置。
+3. 用较低学习率继续验证 `stage2`，优先观察 `math220k_dev_main150` 与 `GSM8K` 的此消彼长。
+4. 在目标机器上验证 `stage2` 清洗与筛选管线。
+5. 在目标机器上验证 `prepare_simpo_data -> train_simpo` 链路。
+6. 在目标机器上验证 `SIMPO` 的 pilot/full 两档训练与 resume。
+7. 基于真实实验结果继续收紧 `SPEC` 与配置。
 
 ## 当前 Stage1 口径
 

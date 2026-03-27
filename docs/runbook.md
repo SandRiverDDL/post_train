@@ -25,6 +25,22 @@
 
 - `data/eval/global_dev_math500_150.jsonl`
 
+如果要从 `Math220K` 生成固定 profile 的 stage2 target dev：
+
+```bash
+.venv/bin/python scripts/prepare_math220k_dev.py --profile main150
+```
+
+当前内置 profile：
+
+- `main150`
+- `short150`
+
+默认输出：
+
+- `data/eval/math220k_dev_main150.jsonl`
+- `data/eval/math220k_dev_main150.report.json`
+
 ## 2. 检查 SFT 数据
 
 ```bash
@@ -122,9 +138,9 @@
 
 当前 MVP 规则：
 
-- `20%` 来自 `stage1_train`
-- `60%` 来自 `math220k_short(<768)`
-- `20%` 来自 `math220k_long(<1380)`
+- `50%` 来自 `stage1_train`
+- `35%` 来自 `math220k_short(<768)`
+- `15%` 来自 `math220k_long(<1380)`
 - `math220k` 中 `question_type == "MCQ"` 直接过滤
 - `math220k` 的 `solution` 会被标准化为单个 `\boxed{...}` 尾部，不再直接重复追加 boxed
 
@@ -139,6 +155,10 @@
 - `stage2` 输入数据由 `prepare_stage2_data.py` 自动生成
 - 训练入口仍复用同一个 `train_sft.py`
 - 默认同样开启按长度分桶与 `5` step 日志
+- 当前推荐 `learning_rate=2e-5`
+- `stage2` 的主观察口径是：
+  - 是否在 `math220k_dev_main150` 上更贴近目标分布
+  - 是否同时伤害 `GSM8K` 这类 transfer benchmark
 
 ## 8. 运行 SIMPO
 

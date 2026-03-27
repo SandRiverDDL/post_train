@@ -5,8 +5,8 @@ backend: vllm
 attn_implementation: sdpa
 batch_size: 6
 max_batch_size:
-max_new_tokens: 1024
-max_seq_length: 1536
+max_new_tokens: 1536
+max_seq_length: 2048
 device: cuda
 # VLLM
 gpu_memory_utilization: 0.70

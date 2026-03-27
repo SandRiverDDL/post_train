@@ -57,6 +57,10 @@
   - 尾部标准化为单个 canonical boxed
   - token 长度分桶
   - 按配额混采 stage2 数据
+- `math220k_dev.py`
+  - 复用 `math220k` 清洗与校验
+  - 固定 profile 分桶抽样
+  - 导出 stage2 target dev
 - `sft.py`
   - stage1 / stage2 SFT 共用训练逻辑
 - `sft_selection.py`
@@ -121,6 +125,13 @@
   - token 长度分桶
   - 多 pool 按配额混采
 - 当前主数据源固定为 `OpenR1-Math-220k-Cleaned` 与 `stage1_train`
+
+Stage2 target dev：
+
+Math220K
+-> 复用标准化与过滤
+-> 固定 profile 分桶抽样
+-> eval JSONL
 
 ### 3. SIMPO
 
