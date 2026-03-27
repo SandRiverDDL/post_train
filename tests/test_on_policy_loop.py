@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -117,6 +118,7 @@ class OnPolicyLoopTest(unittest.TestCase):
             tmp_path = Path(tmp_dir)
             loop_cfg = load_on_policy_loop_config("configs/on_policy/loop.yaml").model_copy(
                 update={
+                    "query_strategy": "uniform_epoch",
                     "round_base_dir": tmp_path / "outputs",
                     "data_base_dir": tmp_path / "data",
                     "max_rounds": 5,
@@ -180,6 +182,7 @@ class OnPolicyLoopTest(unittest.TestCase):
             tmp_path = Path(tmp_dir)
             loop_cfg = load_on_policy_loop_config("configs/on_policy/loop.yaml").model_copy(
                 update={
+                    "query_strategy": "uniform_epoch",
                     "round_base_dir": tmp_path / "outputs",
                     "data_base_dir": tmp_path / "data",
                 }
@@ -199,6 +202,209 @@ class OnPolicyLoopTest(unittest.TestCase):
 
         self.assertEqual(result["summary"]["stop_reason"], "insufficient_retained_data")
         self.assertEqual(result["summary"]["completed_rounds"], 1)
+
+    def test_run_on_policy_loop_records_mixed_strategy_update(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            loop_cfg = load_on_policy_loop_config("configs/on_policy/loop.yaml").model_copy(
+                update={
+                    "query_strategy": "mixed_bootstrap_candidate",
+                    "bootstrap_all_correct_raw_samples": tmp_path / "bootstrap.jsonl",
+                    "candidate_query_file": tmp_path / "candidate.jsonl",
+                    "round_base_dir": tmp_path / "outputs",
+                    "data_base_dir": tmp_path / "data",
+                    "max_rounds": 1,
+                    "round_query_count": 5,
+                    "seed_model": "seed-model",
+                }
+            )
+            data_result = {
+                "raw_samples_output_path": str(tmp_path / "data/round/raw_samples.jsonl"),
+                "retained_output_path": str(tmp_path / "data/round/train.jsonl"),
+                "report_path": str(tmp_path / "data/round/train.report.json"),
+                "report": {"retained": {"kept": 5, "retained_ratio": 1.0}},
+            }
+            mixed_round_rows = [
+                {"id": f"q{i}", "question": f"Question {i}", "final_answer": str(i), "meta": {"source": "toy"}}
+                for i in range(5)
+            ]
+
+            with patch(
+                "post_train.on_policy_loop.build_mixed_query_strategy",
+                return_value={
+                    "state_path": tmp_path / "data/query_strategy/state.json",
+                    "bootstrap_rows": [{"id": "b1"}],
+                    "candidate_rows": [{"id": "c1"}],
+                },
+            ), \
+                patch("post_train.on_policy_loop.load_on_policy_data_config", return_value=load_on_policy_data_config("configs/on_policy/data.yaml")), \
+                patch("post_train.on_policy_loop.load_sft_config", return_value=load_sft_config("configs/on_policy/sft.yaml")), \
+                patch("post_train.on_policy_loop.load_eval_config"), \
+                patch("post_train.on_policy_loop.sample_mixed_round_queries", return_value=(mixed_round_rows, {"effective_query_count": 5, "source_mix": {"candidate_frozen_count": 1}})), \
+                patch("post_train.on_policy_loop.prepare_on_policy_sft_dataset_from_queries", return_value=data_result), \
+                patch("post_train.on_policy_loop.update_mixed_query_strategy", return_value={"candidate_newly_frozen": 1, "candidate_frozen_count": 2}), \
+                patch("post_train.on_policy_loop.train_sft") as mock_train, \
+                patch("post_train.on_policy_loop.evaluate_single_dataset", return_value={"result": {"metrics": {"normalized_accuracy": 0.8}}, "result_path": str(tmp_path / "result.json"), "raw_result_path": str(tmp_path / "raw.json")}):
+                mock_train.side_effect = lambda cfg: Path(cfg.output_dir)
+                result = run_on_policy_loop(loop_cfg)
+
+        self.assertEqual(result["summary"]["query_strategy"], "mixed_bootstrap_candidate")
+        self.assertEqual(result["summary"]["query_strategy_state_path"], str(tmp_path / "data/query_strategy/state.json"))
+
+    def test_run_on_policy_loop_rejects_existing_dirs_without_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            loop_cfg = load_on_policy_loop_config("configs/on_policy/loop.yaml").model_copy(
+                update={
+                    "round_base_dir": tmp_path / "outputs",
+                    "data_base_dir": tmp_path / "data",
+                }
+            )
+            loop_cfg.round_base_dir.mkdir(parents=True)
+
+            with self.assertRaisesRegex(ValueError, "--resume"):
+                run_on_policy_loop(loop_cfg)
+
+    def test_run_on_policy_loop_resume_continues_from_next_round(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            round_base_dir = tmp_path / "outputs"
+            data_base_dir = tmp_path / "data"
+            round_base_dir.mkdir(parents=True)
+            data_base_dir.mkdir(parents=True)
+            loop_cfg = load_on_policy_loop_config("configs/on_policy/loop.yaml").model_copy(
+                update={
+                    "query_strategy": "uniform_epoch",
+                    "round_base_dir": round_base_dir,
+                    "data_base_dir": data_base_dir,
+                    "max_rounds": 2,
+                    "round_query_count": 5,
+                    "seed_model": "seed-model",
+                }
+            )
+            history = {
+                "seed_model": "seed-model",
+                "stop_dataset": "data/eval/global_dev_math500_150.jsonl",
+                "patience": 3,
+                "min_delta": 0.0,
+                "max_rounds": 2,
+                "query_strategy": "uniform_epoch",
+                "best_round_index": 1,
+                "best_holdout_accuracy": 0.7,
+                "best_model_path": str(round_base_dir / "round1"),
+                "current_model": str(round_base_dir / "round1"),
+                "no_improve_rounds": 0,
+                "last_completed_round": 1,
+                "stop_reason": "",
+                "query_sampler_state": {
+                    "seed": 42,
+                    "pool_size": 12,
+                    "epoch_index": 0,
+                    "epoch_offset": 5,
+                },
+                "query_strategy_state_path": "",
+                "rounds": [
+                    {
+                        "round_index": 1,
+                        "round_name": "round1",
+                        "round_model_path": str(round_base_dir / "round1"),
+                    }
+                ],
+            }
+            (round_base_dir / "history.json").write_text(json.dumps(history, ensure_ascii=False), encoding="utf-8")
+            data_result = {
+                "retained_output_path": str(data_base_dir / "round2/train.jsonl"),
+                "report_path": str(data_base_dir / "round2/train.report.json"),
+                "report": {"retained": {"kept": 8, "retained_ratio": 0.8}},
+            }
+            loop_queries = [
+                {"id": f"q{i}", "question": f"Question {i}", "final_answer": str(i), "meta": {"source": "toy"}}
+                for i in range(12)
+            ]
+
+            def fake_sample_round_queries(query_rows, sampler_state, *, requested_count):
+                self.assertEqual(int(sampler_state["epoch_offset"]), 5)
+                return loop_queries[5:10], {
+                    "query_pool_size": len(loop_queries),
+                    "requested_query_count": requested_count,
+                    "effective_query_count": requested_count,
+                    "crossed_epoch": False,
+                    "epoch_index_start": 0,
+                    "epoch_offset_start": 5,
+                    "epoch_index_end": 0,
+                    "epoch_offset_end": 10,
+                }
+
+            with patch("post_train.on_policy_loop.load_on_policy_data_config", return_value=load_on_policy_data_config("configs/on_policy/data.yaml")), \
+                patch("post_train.on_policy_loop.load_sft_config", return_value=load_sft_config("configs/on_policy/sft.yaml")), \
+                patch("post_train.on_policy_loop.load_eval_config"), \
+                patch("post_train.on_policy_loop.load_query_candidates", return_value=(loop_queries, {"available_rows": 12})), \
+                patch("post_train.on_policy_loop.sample_round_queries", side_effect=fake_sample_round_queries), \
+                patch("post_train.on_policy_loop.prepare_on_policy_sft_dataset_from_queries", return_value=data_result), \
+                patch("post_train.on_policy_loop.train_sft") as mock_train, \
+                patch("post_train.on_policy_loop.evaluate_single_dataset", return_value={"result": {"metrics": {"normalized_accuracy": 0.8}}, "result_path": str(tmp_path / "result.json"), "raw_result_path": str(tmp_path / "raw.json")}):
+                mock_train.side_effect = lambda cfg: Path(cfg.output_dir)
+                result = run_on_policy_loop(loop_cfg, resume=True)
+
+        self.assertEqual(result["summary"]["completed_rounds"], 2)
+        self.assertEqual(result["summary"]["best_round_index"], 2)
+        self.assertEqual(result["summary"]["best_model_path"], str(round_base_dir / "round2"))
+
+    def test_run_on_policy_loop_rejects_resume_for_finished_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            round_base_dir = tmp_path / "outputs"
+            data_base_dir = tmp_path / "data"
+            round_base_dir.mkdir(parents=True)
+            data_base_dir.mkdir(parents=True)
+            loop_cfg = load_on_policy_loop_config("configs/on_policy/loop.yaml").model_copy(
+                update={
+                    "round_base_dir": round_base_dir,
+                    "data_base_dir": data_base_dir,
+                }
+            )
+            history = {
+                "seed_model": "seed-model",
+                "stop_reason": "no_improvement",
+                "rounds": [],
+            }
+            (round_base_dir / "history.json").write_text(json.dumps(history, ensure_ascii=False), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "自然结束"):
+                run_on_policy_loop(loop_cfg, resume=True)
+
+    def test_run_on_policy_loop_overwrite_removes_stale_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            round_base_dir = tmp_path / "outputs"
+            data_base_dir = tmp_path / "data"
+            (round_base_dir / "stale.txt").parent.mkdir(parents=True)
+            (round_base_dir / "stale.txt").write_text("old", encoding="utf-8")
+            (data_base_dir / "stale.txt").parent.mkdir(parents=True)
+            (data_base_dir / "stale.txt").write_text("old", encoding="utf-8")
+            loop_cfg = load_on_policy_loop_config("configs/on_policy/loop.yaml").model_copy(
+                update={
+                    "query_strategy": "uniform_epoch",
+                    "round_base_dir": round_base_dir,
+                    "data_base_dir": data_base_dir,
+                }
+            )
+            data_cfg = load_on_policy_data_config("configs/on_policy/data.yaml")
+            loop_queries = [{"id": f"q{i}", "question": f"Question {i}", "final_answer": str(i)} for i in range(6)]
+
+            with patch("post_train.on_policy_loop.load_on_policy_data_config", return_value=data_cfg), \
+                patch("post_train.on_policy_loop.load_sft_config"), \
+                patch("post_train.on_policy_loop.load_eval_config"), \
+                patch("post_train.on_policy_loop.load_query_candidates", return_value=(loop_queries, {"available_rows": 6})), \
+                patch(
+                    "post_train.on_policy_loop.prepare_on_policy_sft_dataset_from_queries",
+                    side_effect=InsufficientRetainedSamplesError("retained 样本不足"),
+                ):
+                result = run_on_policy_loop(loop_cfg, overwrite=True)
+
+        self.assertFalse((round_base_dir / "stale.txt").exists())
+        self.assertFalse((data_base_dir / "stale.txt").exists())
+        self.assertEqual(result["summary"]["stop_reason"], "insufficient_retained_data")
 
 
 if __name__ == "__main__":

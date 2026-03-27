@@ -1,10 +1,25 @@
+# 当前 on-policy 主实验入口。
+# 通常只需要改：seed_model、round_query_count、max_rounds。
 seed_model: outputs/stage1_sft_5000/checkpoint-200
 base_on_policy_data_config: configs/on_policy/data.yaml
 base_sft_config: configs/on_policy/sft.yaml
 eval_config: configs/eval/default.yaml
+
+# 早停评测集。
 stop_dataset: data/eval/global_dev_math500_150.jsonl
 max_rounds: 10
 round_query_count: 256
+
+# 当前实验策略：
+# 30% 从 round1 的 all_correct bootstrap 池抽，
+# 70% 从 round1 派生的 mixed 1000 题候选池抽。
+query_strategy: mixed_bootstrap_candidate
+bootstrap_all_correct_raw_samples: data/on_policy/raw_samples.round1.jsonl
+candidate_query_file: data/on_policy/candidate_pool.mixed_1000.jsonl
+bootstrap_ratio: 0.3
+candidate_ratio: 0.7
+candidate_freeze_all_correct_hits: 2
+
 patience: 3
 min_delta: 0.0
 round_base_dir: outputs/on_policy_loop

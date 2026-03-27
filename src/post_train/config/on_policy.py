@@ -65,6 +65,12 @@ class OnPolicyLoopConfig(BaseModel):
     stop_dataset: Path = Path("data/eval/global_dev_math500_150.jsonl")
     max_rounds: int = Field(default=10, ge=1)
     round_query_count: int = Field(default=256, ge=1)
+    query_strategy: Literal["uniform_epoch", "mixed_bootstrap_candidate"] = "uniform_epoch"
+    bootstrap_all_correct_raw_samples: Path | None = None
+    candidate_query_file: Path | None = None
+    bootstrap_ratio: float = Field(default=0.3, ge=0.0, le=1.0)
+    candidate_ratio: float = Field(default=0.7, ge=0.0, le=1.0)
+    candidate_freeze_all_correct_hits: int = Field(default=2, ge=1)
     patience: int = Field(default=3, ge=1)
     min_delta: float = Field(default=0.0, ge=0.0)
     round_base_dir: Path = Path("outputs/on_policy_loop")
@@ -73,3 +79,15 @@ class OnPolicyLoopConfig(BaseModel):
     batch_size: int | str | None = None
     max_new_tokens: int | None = Field(default=None, ge=1)
     limit: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _validate_strategy(self) -> "OnPolicyLoopConfig":
+        ratio_sum = self.bootstrap_ratio + self.candidate_ratio
+        if abs(ratio_sum - 1.0) > 1.0e-6:
+            raise ValueError("bootstrap_ratio 与 candidate_ratio 之和必须等于 1.0。")
+        if self.query_strategy == "mixed_bootstrap_candidate":
+            if self.bootstrap_all_correct_raw_samples is None:
+                raise ValueError("mixed_bootstrap_candidate 需要提供 bootstrap_all_correct_raw_samples。")
+            if self.candidate_query_file is None:
+                raise ValueError("mixed_bootstrap_candidate 需要提供 candidate_query_file。")
+        return self

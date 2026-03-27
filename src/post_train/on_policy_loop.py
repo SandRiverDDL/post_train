@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import random
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,25 @@ from post_train.on_policy_data import (
     load_query_candidates,
     prepare_on_policy_sft_dataset_from_queries,
 )
+from post_train.on_policy_query_strategy import (
+    STRATEGY_MIXED_BOOTSTRAP_CANDIDATE,
+    build_mixed_query_strategy,
+    build_query_sampler_state,
+    dump_query_sampler_state,
+    load_mixed_query_strategy_state,
+    load_query_sampler_state,
+    sample_mixed_round_queries,
+    sample_round_queries,
+    update_mixed_query_strategy,
+)
 from post_train.sft import train_sft
+
+FINISHED_STOP_REASONS = {
+    "no_improvement",
+    "max_rounds_reached",
+    "completed",
+    "insufficient_retained_data",
+}
 
 
 def _write_json(path: str | Path, payload: dict[str, Any]) -> Path:
@@ -32,6 +50,10 @@ def _write_json(path: str | Path, payload: dict[str, Any]) -> Path:
     with output_path.open("w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
     return output_path
+
+
+def _read_json(path: str | Path) -> dict[str, Any]:
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def build_round_name(round_index: int) -> str:
@@ -152,10 +174,69 @@ def _is_improved(current: float, best_so_far: float | None, *, min_delta: float)
     return current > (best_so_far + min_delta)
 
 
-def _ensure_fresh_loop_dirs(cfg: OnPolicyLoopConfig) -> None:
+def _remove_loop_dirs(cfg: OnPolicyLoopConfig) -> None:
     for path in (cfg.round_base_dir, cfg.data_base_dir):
         if path.exists():
-            raise ValueError(f"自动循环输出目录已存在：{path}")
+            shutil.rmtree(path)
+
+
+def _history_path(cfg: OnPolicyLoopConfig) -> Path:
+    return cfg.round_base_dir / "history.json"
+
+
+def _final_summary_path(cfg: OnPolicyLoopConfig) -> Path:
+    return cfg.round_base_dir / "final_summary.json"
+
+
+def _prepare_loop_run(
+    cfg: OnPolicyLoopConfig,
+    *,
+    resume: bool,
+    overwrite: bool,
+) -> dict[str, Any]:
+    if resume and overwrite:
+        raise ValueError("--resume 与 --overwrite 不能同时使用。")
+    history_path = _history_path(cfg)
+    final_summary_path = _final_summary_path(cfg)
+    has_existing_dirs = cfg.round_base_dir.exists() or cfg.data_base_dir.exists()
+    if overwrite:
+        _remove_loop_dirs(cfg)
+        return {
+            "mode": "fresh",
+            "history_path": history_path,
+            "final_summary_path": final_summary_path,
+        }
+    if not has_existing_dirs:
+        return {
+            "mode": "fresh",
+            "history_path": history_path,
+            "final_summary_path": final_summary_path,
+        }
+    if not resume:
+        raise ValueError(
+            "自动循环输出目录已存在，请显式使用 --resume 继续未完成 run，或使用 --overwrite 重开。"
+        )
+    if history_path.exists():
+        history = _read_json(history_path)
+        stop_reason = str(history.get("stop_reason", ""))
+        if stop_reason in FINISHED_STOP_REASONS:
+            raise ValueError(
+                f"自动循环已经自然结束（stop_reason={stop_reason}），不能用 --resume 继续；请使用 --overwrite 重开。"
+            )
+        return {
+            "mode": "resume",
+            "history_path": history_path,
+            "final_summary_path": final_summary_path,
+            "history": history,
+        }
+    if final_summary_path.exists():
+        final_summary = _read_json(final_summary_path)
+        stop_reason = str(final_summary.get("stop_reason", ""))
+        if stop_reason in FINISHED_STOP_REASONS:
+            raise ValueError(
+                f"自动循环已经自然结束（stop_reason={stop_reason}），不能用 --resume 继续；请使用 --overwrite 重开。"
+            )
+    raise ValueError("检测到已有 on-policy loop 目录，但缺少可恢复的 history.json；请使用 --overwrite 重开。")
 
 
 def _history_payload(
@@ -164,7 +245,12 @@ def _history_payload(
     rounds: list[dict[str, Any]],
     best_round_index: int | None,
     best_holdout_accuracy: float | None,
+    best_model_path: str | None,
+    current_model: str,
+    no_improve_rounds: int,
     stop_reason: str | None,
+    query_sampler_state: dict[str, Any] | None,
+    query_strategy_state_path: str | None,
 ) -> dict[str, Any]:
     return {
         "seed_model": loop_cfg.seed_model,
@@ -172,106 +258,88 @@ def _history_payload(
         "patience": loop_cfg.patience,
         "min_delta": loop_cfg.min_delta,
         "max_rounds": loop_cfg.max_rounds,
+        "query_strategy": loop_cfg.query_strategy,
         "best_round_index": best_round_index,
         "best_holdout_accuracy": best_holdout_accuracy,
+        "best_model_path": best_model_path or "",
+        "current_model": current_model,
+        "no_improve_rounds": no_improve_rounds,
+        "last_completed_round": len(rounds),
         "stop_reason": stop_reason or "",
+        "query_sampler_state": query_sampler_state,
+        "query_strategy_state_path": query_strategy_state_path or "",
         "rounds": rounds,
     }
 
-
-def build_query_epoch_rows(
-    query_rows: list[dict[str, Any]],
+def run_on_policy_loop(
+    cfg: OnPolicyLoopConfig,
     *,
-    seed: int,
-    epoch_index: int,
-) -> list[dict[str, Any]]:
-    shuffled = list(query_rows)
-    random.Random(seed + epoch_index).shuffle(shuffled)
-    return shuffled
-
-
-def build_query_sampler_state(
-    query_rows: list[dict[str, Any]],
-    *,
-    seed: int,
+    resume: bool = False,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
-    if not query_rows:
-        raise ValueError("query 池为空，无法启动 on-policy loop。")
-    return {
-        "seed": seed,
-        "pool_size": len(query_rows),
-        "epoch_index": 0,
-        "epoch_offset": 0,
-        "epoch_rows": build_query_epoch_rows(query_rows, seed=seed, epoch_index=0),
-    }
-
-
-def sample_round_queries(
-    query_rows: list[dict[str, Any]],
-    sampler_state: dict[str, Any],
-    *,
-    requested_count: int,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    if not query_rows:
-        raise ValueError("query 池为空，无法为当前轮采样。")
-    effective_query_count = min(requested_count, len(query_rows))
-    if effective_query_count <= 0:
-        raise ValueError("requested_count 必须大于 0。")
-
-    start_epoch_index = int(sampler_state["epoch_index"])
-    start_epoch_offset = int(sampler_state["epoch_offset"])
-    sampled_rows: list[dict[str, Any]] = []
-    crossed_epoch = False
-
-    while len(sampled_rows) < effective_query_count:
-        epoch_rows = sampler_state["epoch_rows"]
-        epoch_offset = int(sampler_state["epoch_offset"])
-        remaining = effective_query_count - len(sampled_rows)
-        take = min(remaining, len(epoch_rows) - epoch_offset)
-        sampled_rows.extend(epoch_rows[epoch_offset : epoch_offset + take])
-        sampler_state["epoch_offset"] = epoch_offset + take
-        if len(sampled_rows) >= effective_query_count:
-            break
-        crossed_epoch = True
-        sampler_state["epoch_index"] = int(sampler_state["epoch_index"]) + 1
-        sampler_state["epoch_rows"] = build_query_epoch_rows(
-            query_rows,
-            seed=int(sampler_state["seed"]),
-            epoch_index=int(sampler_state["epoch_index"]),
-        )
-        sampler_state["epoch_offset"] = 0
-
-    return sampled_rows, {
-        "query_pool_size": len(query_rows),
-        "requested_query_count": requested_count,
-        "effective_query_count": effective_query_count,
-        "crossed_epoch": crossed_epoch,
-        "epoch_index_start": start_epoch_index,
-        "epoch_offset_start": start_epoch_offset,
-        "epoch_index_end": int(sampler_state["epoch_index"]),
-        "epoch_offset_end": int(sampler_state["epoch_offset"]),
-    }
-
-
-def run_on_policy_loop(cfg: OnPolicyLoopConfig) -> dict[str, Any]:
-    _ensure_fresh_loop_dirs(cfg)
+    run_state = _prepare_loop_run(cfg, resume=resume, overwrite=overwrite)
     base_data_cfg = load_on_policy_data_config(cfg.base_on_policy_data_config)
     base_train_cfg = load_sft_config(cfg.base_sft_config)
     eval_cfg = load_eval_config(cfg.eval_config)
-    query_rows, query_pool_report = load_query_candidates(base_data_cfg)
-    query_sampler_state = build_query_sampler_state(query_rows, seed=base_data_cfg.seed)
-    history_path = cfg.round_base_dir / "history.json"
-    final_summary_path = cfg.round_base_dir / "final_summary.json"
+    history_path = run_state["history_path"]
+    final_summary_path = run_state["final_summary_path"]
 
-    current_model = cfg.seed_model
-    best_holdout_accuracy: float | None = None
-    best_round_index: int | None = None
-    best_model_path: str | None = None
-    no_improve_rounds = 0
+    restored_history = run_state.get("history", {})
+    mixed_strategy_state: dict[str, Any] | None = None
+    if cfg.query_strategy == STRATEGY_MIXED_BOOTSTRAP_CANDIDATE:
+        if run_state["mode"] == "resume":
+            strategy_state_path = restored_history.get("query_strategy_state_path") or (
+                cfg.data_base_dir / "query_strategy" / "state.json"
+            )
+            mixed_strategy_state = load_mixed_query_strategy_state(strategy_state_path)
+            if int(mixed_strategy_state.get("last_updated_round", 0)) != int(restored_history.get("last_completed_round", 0)):
+                raise ValueError("mixed query strategy 状态与 history 不一致，无法安全 resume；请使用 --overwrite 重开。")
+        else:
+            mixed_strategy_state = build_mixed_query_strategy(
+                bootstrap_all_correct_raw_samples=cfg.bootstrap_all_correct_raw_samples,
+                candidate_query_file=cfg.candidate_query_file,
+                data_base_dir=cfg.data_base_dir,
+                seed=base_data_cfg.seed,
+                bootstrap_ratio=cfg.bootstrap_ratio,
+                candidate_ratio=cfg.candidate_ratio,
+                candidate_freeze_all_correct_hits=cfg.candidate_freeze_all_correct_hits,
+            )
+        query_rows: list[dict[str, Any]] = []
+        query_pool_report = {
+            "query_strategy": cfg.query_strategy,
+            "bootstrap_all_correct_raw_samples": str(cfg.bootstrap_all_correct_raw_samples),
+            "candidate_query_file": str(cfg.candidate_query_file),
+            "bootstrap_pool_size": len(mixed_strategy_state["bootstrap_rows"]),
+            "candidate_pool_size": len(mixed_strategy_state["candidate_rows"]),
+        }
+        query_sampler_state = None
+    else:
+        query_rows, query_pool_report = load_query_candidates(base_data_cfg)
+        if run_state["mode"] == "resume":
+            query_sampler_state = load_query_sampler_state(query_rows, restored_history.get("query_sampler_state"))
+            if query_sampler_state is None:
+                raise ValueError("history 缺少 uniform sampler state，无法安全 resume；请使用 --overwrite 重开。")
+        else:
+            query_sampler_state = build_query_sampler_state(query_rows, seed=base_data_cfg.seed)
+
+    current_model = str(restored_history.get("current_model") or cfg.seed_model)
+    best_holdout_accuracy = (
+        float(restored_history["best_holdout_accuracy"])
+        if restored_history.get("best_holdout_accuracy") is not None
+        else None
+    )
+    best_round_index = (
+        int(restored_history["best_round_index"])
+        if restored_history.get("best_round_index") is not None
+        else None
+    )
+    best_model_path = str(restored_history.get("best_model_path") or "") or None
+    no_improve_rounds = int(restored_history.get("no_improve_rounds", 0))
     stop_reason: str | None = None
-    round_summaries: list[dict[str, Any]] = []
+    round_summaries: list[dict[str, Any]] = list(restored_history.get("rounds", []))
+    start_round_index = int(restored_history.get("last_completed_round", 0)) + 1
 
-    for round_index in range(1, cfg.max_rounds + 1):
+    for round_index in range(start_round_index, cfg.max_rounds + 1):
         round_name = build_round_name(round_index)
         round_paths = build_round_paths(cfg, round_index)
         try:
@@ -281,15 +349,26 @@ def run_on_policy_loop(cfg: OnPolicyLoopConfig) -> dict[str, Any]:
                 round_index=round_index,
                 generation_model=current_model,
             )
-            round_queries, sampler_report = sample_round_queries(
-                query_rows,
-                query_sampler_state,
-                requested_count=cfg.round_query_count,
-            )
+            if cfg.query_strategy == STRATEGY_MIXED_BOOTSTRAP_CANDIDATE:
+                if mixed_strategy_state is None:
+                    raise ValueError("mixed strategy state 未初始化。")
+                round_queries, sampler_report = sample_mixed_round_queries(
+                    mixed_strategy_state,
+                    requested_count=cfg.round_query_count,
+                )
+            else:
+                if query_sampler_state is None:
+                    raise ValueError("uniform sampler state 未初始化。")
+                round_queries, sampler_report = sample_round_queries(
+                    query_rows,
+                    query_sampler_state,
+                    requested_count=cfg.round_query_count,
+                )
             round_query_report = dict(query_pool_report)
             round_query_report["sampled_queries"] = len(round_queries)
             round_query_report["effective_query_count"] = sampler_report["effective_query_count"]
             round_query_report["round_query_count"] = cfg.round_query_count
+            round_query_report["query_strategy"] = cfg.query_strategy
             data_result = prepare_on_policy_sft_dataset_from_queries(
                 data_cfg,
                 query_rows=round_queries,
@@ -341,16 +420,29 @@ def run_on_policy_loop(cfg: OnPolicyLoopConfig) -> dict[str, Any]:
         else:
             no_improve_rounds += 1
 
+        if cfg.query_strategy == STRATEGY_MIXED_BOOTSTRAP_CANDIDATE:
+            if mixed_strategy_state is None:
+                raise ValueError("mixed strategy state 未初始化。")
+            strategy_update = update_mixed_query_strategy(
+                mixed_strategy_state,
+                raw_samples_path=data_result["raw_samples_output_path"],
+                round_index=round_index,
+            )
+        else:
+            strategy_update = {}
+
         retained_report = data_result["report"]["retained"]
         round_summary = {
             "round_index": round_index,
             "round_name": round_name,
             "generation_model": current_model,
+            "query_strategy": cfg.query_strategy,
             "primary_selector": str(data_result["report"].get("primary_selector", "")),
             "round_query_count": cfg.round_query_count,
             "retained_count": int(retained_report["kept"]),
             "retained_ratio": float(retained_report["retained_ratio"]),
             "query_sampling": sampler_report,
+            "query_strategy_update": strategy_update,
             "round_model_path": str(train_output_dir),
             "stop_dataset": str(cfg.stop_dataset),
             "holdout_accuracy": holdout_accuracy,
@@ -364,6 +456,9 @@ def run_on_policy_loop(cfg: OnPolicyLoopConfig) -> dict[str, Any]:
         }
         _write_json(round_paths["round_summary_path"], round_summary)
         round_summaries.append(round_summary)
+        current_model = str(train_output_dir)
+        if no_improve_rounds >= cfg.patience:
+            stop_reason = "no_improvement"
         _write_json(
             history_path,
             _history_payload(
@@ -371,13 +466,20 @@ def run_on_policy_loop(cfg: OnPolicyLoopConfig) -> dict[str, Any]:
                 rounds=round_summaries,
                 best_round_index=best_round_index,
                 best_holdout_accuracy=best_holdout_accuracy,
+                best_model_path=best_model_path,
+                current_model=current_model,
+                no_improve_rounds=no_improve_rounds,
                 stop_reason=stop_reason,
+                query_sampler_state=dump_query_sampler_state(query_sampler_state),
+                query_strategy_state_path=(
+                    str(mixed_strategy_state["state_path"])
+                    if mixed_strategy_state is not None
+                    else ""
+                ),
             ),
         )
-
-        current_model = str(train_output_dir)
-        if no_improve_rounds >= cfg.patience:
-            stop_reason = "no_improvement"
+        
+        if stop_reason == "no_improvement":
             break
 
     if stop_reason is None:
@@ -393,6 +495,12 @@ def run_on_policy_loop(cfg: OnPolicyLoopConfig) -> dict[str, Any]:
         "best_holdout_accuracy": best_holdout_accuracy,
         "best_model_path": best_model_path or "",
         "history_path": str(history_path),
+        "query_strategy": cfg.query_strategy,
+        "query_strategy_state_path": (
+            str(mixed_strategy_state["state_path"])
+            if mixed_strategy_state is not None
+            else ""
+        ),
     }
     _write_json(
         history_path,
@@ -401,7 +509,16 @@ def run_on_policy_loop(cfg: OnPolicyLoopConfig) -> dict[str, Any]:
             rounds=round_summaries,
             best_round_index=best_round_index,
             best_holdout_accuracy=best_holdout_accuracy,
+            best_model_path=best_model_path,
+            current_model=current_model,
+            no_improve_rounds=no_improve_rounds,
             stop_reason=stop_reason,
+            query_sampler_state=dump_query_sampler_state(query_sampler_state),
+            query_strategy_state_path=(
+                str(mixed_strategy_state["state_path"])
+                if mixed_strategy_state is not None
+                else ""
+            ),
         ),
     )
     _write_json(final_summary_path, final_summary)

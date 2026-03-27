@@ -68,14 +68,37 @@
 .venv/bin/python scripts/run_on_policy_loop.py --config configs/on_policy/loop.yaml
 ```
 
+继续未完成 run：
+
+```bash
+.venv/bin/python scripts/run_on_policy_loop.py --config configs/on_policy/loop.yaml --resume
+```
+
+清空旧 run 后重开：
+
+```bash
+.venv/bin/python scripts/run_on_policy_loop.py --config configs/on_policy/loop.yaml --overwrite
+```
+
 默认行为：
 
 - 从 `seed_model` 开始进入 round1
 - 每轮抽样数量由 `round_query_count` 单独控制，默认 `256`
+- 当前主配置默认 `query_strategy=mixed_bootstrap_candidate`
 - 每轮自动串起 `prepare -> train -> holdout eval`
-- query 按 epoch 洗牌消费，先无放回扫完整个池，再重洗继续
+- bootstrap 池来自 `data/on_policy/raw_samples.round1.jsonl` 中的 `all_correct`
+- candidate 池默认是 `data/on_policy/candidate_pool.mixed_1000.jsonl`
 - 连续 `3` 轮没有更高的 holdout accuracy 就停止
 - 默认最多跑 `10` 轮
+- `--resume` 只用于恢复未完成 run，不用于继续一个已自然结束的实验
+- resume 只做到“按轮恢复”，不支持训练内部 checkpoint 级恢复
+
+实验性 mixed 策略：
+
+- 30% 从固定 bootstrap `all_correct` 池抽，70% 从外部 candidate 池抽
+- candidate 题目累计两次被抽中且两次都 `all_correct` 后会冻结
+- 策略状态单独落到 `data/on_policy_loop/query_strategy/`，不和稳定训练/评测流程耦合
+- 若要回退旧行为，可手动切回 `query_strategy=uniform_epoch`
 
 默认产物：
 
