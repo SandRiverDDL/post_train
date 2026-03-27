@@ -35,12 +35,16 @@
 ```bash
 .venv/bin/python scripts/eval_model.py \
   --config configs/eval/default.yaml \
-  --runner vllm_raw \
   --model outputs/on_policy_sft/round1 \
   --dataset data/eval/global_dev_math500_150.jsonl \
   --batch-size 6 \
   --output outputs/eval
 ```
+
+默认结果会落到：
+
+- `outputs/eval/on_policy_sft/round1/global_dev_math500_150/result.json`
+- `outputs/eval/on_policy_sft/round1/global_dev_math500_150/raw.json`
 
 ### 4. 自动运行多轮 on-policy
 
@@ -61,4 +65,6 @@
 
 - 这里的 `runbook` 只放可执行步骤和常用命令。
 - 当前主线优先看 `on_policy.md`，不要从暂停路线开始执行。
+- benchmark、`global_dev`、`AIME`、`math220k_dev` 统一通过 `scripts/prepare_eval_data.py` 准备。
+- 评测结果默认按模型路径和任务名分目录，不再平铺堆在 `outputs/eval/` 根目录。
 - 若文档与实现冲突，以 `AGENTS.md`、`SPEC.md`、`STATE.md` 为准，并优先修正文档。

@@ -9,7 +9,6 @@ patience: 3
 min_delta: 0.0
 round_base_dir: outputs/on_policy_loop
 data_base_dir: data/on_policy_loop
-runner: vllm_raw
 backend: vllm
 batch_size: 6
 max_new_tokens: 1536

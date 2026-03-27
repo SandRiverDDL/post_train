@@ -7,11 +7,13 @@
 ## 当前有效基线
 
 - 代码主包：`src/post_train/`
-- 薄入口：`prepare_stage1_data.py`、`check_sft_data.py`、`train_sft.py`、`eval_model.py`、`prepare_on_policy_sft_data.py`、`run_on_policy_loop.py`、`prepare_simpo_data.py`、`train_simpo.py`
+- 薄入口：`prepare_stage1_data.py`、`prepare_eval_data.py`、`check_sft_data.py`、`train_sft.py`、`eval_model.py`、`prepare_on_policy_sft_data.py`、`run_on_policy_loop.py`、`prepare_simpo_data.py`、`train_simpo.py`
+- 配置目录：`configs/eval/`、`configs/on_policy/`、`configs/stage1/`、`configs/stage2/`、`configs/simpo/`
 - 当前开发模型：`Qwen/Qwen2.5-Math-1.5B`
 - 当前 `stage1` 数据口径：`UWNSL/MATH_training_split_short_cot`，首版规模 `2000`
 - 当前 on-policy 数据口径：固定使用 `data/stage1_train_5000.jsonl` 作为 query registry，并保留全量轨迹归档
 - 当前基础起点：`outputs/stage1_sft_5000/checkpoint-200`
+- 当前评测结果目录口径：`outputs/eval/<模型路径>/<task>/result.json` 与 `raw.json`
 - 暂停中的候选路线：`docs/experiments/two-stage-sft-simpo.md`
 
 ## 当前最重要的问题

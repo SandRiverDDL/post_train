@@ -1,10 +1,8 @@
 model_name: Qwen/Qwen2.5-Math-1.5B
 output_dir: outputs/eval
-runner: vllm_raw
 backend: vllm
 attn_implementation: sdpa
 batch_size: 6
-max_batch_size:
 max_new_tokens: 1536
 max_seq_length: 2048
 device: cuda

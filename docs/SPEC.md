@@ -64,10 +64,9 @@
 - 开发模型：`Qwen/Qwen2.5-Math-1.5B`
 - 正式 benchmark：`GSM8K`、`MATH-500`
 - 额外支持 opt-in 的 sampled benchmark 组：`AIME24`、`AIME25`
-- 正式评测支持两条链路：
-  - `vllm_raw`：直接用 `vLLM` 生成，本地 parser + `math-verify` 判定
-  - `lm_eval`：`lm-eval-harness` 负责编排推理，本地 parser + `math-verify` 判定
 - 当前默认评测链路：`vllm_raw`
+- 当前执行口径默认只使用 `vllm_raw`
+- `eval` 结果默认落到 `outputs/eval/<模型路径>/<task>/result.json` 与 `raw.json`
 - `AIME24/AIME25` 当前口径：
   - 不进入默认 `configs/eval/default.yaml`
   - 通过单独 `configs/eval/aime.yaml` opt-in
@@ -104,5 +103,5 @@
 ## 参数口径
 
 - 当前推荐 prompt、LoRA、训练与评测超参会在配置中维护。
-- `configs/*.yaml` 是可执行参数真源。
+- `configs/<workflow>/*.yaml` 是可执行参数真源。
 - `SPEC.md` 只保留当前主线推荐口径与原则，不逐项同步所有细参数。

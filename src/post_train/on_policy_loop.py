@@ -7,6 +7,7 @@ from typing import Any
 
 from post_train.config import (
     EvalConfig,
+    EvalTaskConfig,
     OnPolicyDataConfig,
     OnPolicyLoopConfig,
     SFTTrainConfig,
@@ -15,13 +16,7 @@ from post_train.config import (
     load_sft_config,
 )
 from post_train.eval import (
-    resolve_model_args,
-    result_from_harness_logs,
-    result_from_vllm_raw_logs,
-    run_harness_eval,
-    run_vllm_raw_eval,
-    write_eval_result,
-    write_raw_eval_result,
+    run_eval_task,
 )
 from post_train.io import ensure_parent
 from post_train.on_policy_data import (
@@ -117,72 +112,37 @@ def evaluate_single_dataset(
     dataset_path: str | Path,
     eval_cfg: EvalConfig,
     output_dir: str | Path,
-    runner: str | None = None,
     backend: str | None = None,
     batch_size: int | str | None = None,
-    max_batch_size: int | None = None,
     max_new_tokens: int | None = None,
     limit: int | None = None,
 ) -> dict[str, Any]:
-    resolved_runner = runner or eval_cfg.runner
     resolved_backend = backend or eval_cfg.backend
+    if resolved_backend != "vllm":
+        raise ValueError("当前评测只支持 backend=vllm。")
     resolved_batch_size = _effective_eval_setting(batch_size, eval_cfg.batch_size)
-    resolved_max_batch_size = max_batch_size if max_batch_size is not None else eval_cfg.max_batch_size
     resolved_max_new_tokens = int(
         _effective_eval_setting(max_new_tokens, eval_cfg.max_new_tokens) or eval_cfg.max_new_tokens
     )
-    model_args = resolve_model_args(
-        model_name,
-        eval_cfg.model_name,
-        backend=resolved_backend,
-        max_length=eval_cfg.max_seq_length,
-        device=eval_cfg.device,
-        attn_implementation=eval_cfg.attn_implementation,
-        gpu_memory_utilization=eval_cfg.gpu_memory_utilization,
-        max_lora_rank=eval_cfg.max_lora_rank,
-    )
     task_name = Path(dataset_path).stem.replace("-", "_")
-    if resolved_runner == "lm_eval":
-        raw_result = run_harness_eval(
-            backend=resolved_backend,
-            model_args=model_args,
-            dataset_path=dataset_path,
-            task_name=task_name,
-            batch_size=resolved_batch_size,
-            max_batch_size=resolved_max_batch_size,
-            limit=limit,
-            max_gen_toks=resolved_max_new_tokens,
-        )
-        result = result_from_harness_logs(
-            raw_result,
-            task_name=task_name,
-            dataset_path=dataset_path,
-            model_name=model_name,
-        )
-    else:
-        raw_result = run_vllm_raw_eval(
-            model_args=model_args,
-            dataset_path=dataset_path,
-            task_name=task_name,
-            batch_size=resolved_batch_size,
-            limit=limit,
-            max_gen_toks=resolved_max_new_tokens,
-        )
-        result = result_from_vllm_raw_logs(
-            raw_result,
-            task_name=task_name,
-            dataset_path=dataset_path,
-            model_name=model_name,
-        )
-    output_root = Path(output_dir) / task_name
-    final_output_path = output_root / "result.json"
-    raw_output_path = output_root / "raw.json"
-    write_raw_eval_result(raw_output_path, raw_result)
-    write_eval_result(final_output_path, result)
+    task = EvalTaskConfig(
+        name=task_name,
+        dataset_path=Path(dataset_path),
+        output_path=Path(output_dir) / task_name,
+    )
+    run_result = run_eval_task(
+        model_name=model_name,
+        task=task,
+        eval_cfg=eval_cfg.model_copy(update={"backend": resolved_backend}),
+        batch_size=resolved_batch_size,
+        max_new_tokens=resolved_max_new_tokens,
+        limit=limit,
+        output_dir=output_dir,
+    )
     return {
-        "result": result,
-        "result_path": str(final_output_path),
-        "raw_result_path": str(raw_output_path),
+        "result": run_result["result"],
+        "result_path": str(run_result["result_path"]),
+        "raw_result_path": str(run_result["raw_result_path"]),
     }
 
 
@@ -361,10 +321,8 @@ def run_on_policy_loop(cfg: OnPolicyLoopConfig) -> dict[str, Any]:
             dataset_path=cfg.stop_dataset,
             eval_cfg=eval_cfg,
             output_dir=round_paths["output_dir"] / "holdout_eval",
-            runner=cfg.runner,
             backend=cfg.backend,
             batch_size=cfg.batch_size,
-            max_batch_size=cfg.max_batch_size,
             max_new_tokens=cfg.max_new_tokens,
             limit=cfg.limit,
         )

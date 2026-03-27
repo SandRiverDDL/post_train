@@ -51,12 +51,16 @@
 ```bash
 .venv/bin/python scripts/eval_model.py \
   --config configs/eval/default.yaml \
-  --runner vllm_raw \
   --model outputs/on_policy_sft/round1 \
   --dataset data/eval/global_dev_math500_150.jsonl \
   --batch-size 6 \
   --output outputs/eval
 ```
+
+默认结果目录示例：
+
+- `outputs/eval/on_policy_sft/round1/global_dev_math500_150/result.json`
+- `outputs/eval/on_policy_sft/round1/global_dev_math500_150/raw.json`
 
 ## 自动循环
 
@@ -78,6 +82,8 @@
 - `outputs/on_policy_loop/history.json`
 - `outputs/on_policy_loop/final_summary.json`
 - `outputs/on_policy_loop/round*/round_summary.json`
+- `outputs/on_policy_loop/round*/holdout_eval/<task>/result.json`
+- `outputs/on_policy_loop/round*/holdout_eval/<task>/raw.json`
 - `data/on_policy_loop/round*/`
 
 ## 手动循环建议

@@ -18,10 +18,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-config", required=True, help="评测配置文件路径")
     parser.add_argument("--train-output-dir", required=True, help="SFT 训练输出目录")
     parser.add_argument("--dataset", required=True, help="用于选择 checkpoint 的 dev 数据集路径")
-    parser.add_argument("--runner", default=None, choices=("vllm_raw", "lm_eval"), help="覆盖评测 runner")
-    parser.add_argument("--backend", default=None, choices=("hf", "vllm"), help="覆盖评测后端")
+    parser.add_argument("--backend", default=None, choices=("vllm",), help="覆盖评测后端")
     parser.add_argument("--batch-size", default=None, help="覆盖 batch size")
-    parser.add_argument("--max-batch-size", type=int, default=None, help="覆盖 max batch size")
     parser.add_argument("--max-new-tokens", type=int, default=None, help="覆盖生成长度上限")
     parser.add_argument("--limit", type=int, default=None, help="只评测前 N 条")
     return parser.parse_args()
@@ -34,10 +32,8 @@ def main() -> None:
         train_output_dir=args.train_output_dir,
         dataset_path=args.dataset,
         eval_cfg=eval_cfg,
-        runner=args.runner,
         backend=args.backend,
         batch_size=args.batch_size,
-        max_batch_size=args.max_batch_size,
         max_new_tokens=args.max_new_tokens,
         limit=args.limit,
     )

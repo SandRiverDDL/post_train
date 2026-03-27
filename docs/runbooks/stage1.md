@@ -2,7 +2,7 @@
 
 这份文档只覆盖基础数据准备、`stage1` 训练和 checkpoint 选择。
 
-## 准备 stage1 与 benchmark 数据
+## 准备 stage1 数据
 
 ```bash
 .venv/bin/python scripts/prepare_stage1_data.py \
@@ -14,16 +14,15 @@
 
 - `data/stage1_train.jsonl`
 - `data/stage1_dev200.jsonl`
-- `data/eval/gsm8k_test.jsonl`
-- `data/eval/math500_test.jsonl`
 
-如需额外准备评测数据：
+如需准备 benchmark 与其他评测数据：
 
 ```bash
-.venv/bin/python scripts/prepare_global_dev.py
-.venv/bin/python scripts/prepare_math220k_dev.py --profile main150
-.venv/bin/python scripts/prepare_aime_eval.py --year 24
-.venv/bin/python scripts/prepare_aime_eval.py --year 25
+.venv/bin/python scripts/prepare_eval_data.py benchmarks
+.venv/bin/python scripts/prepare_eval_data.py global-dev
+.venv/bin/python scripts/prepare_eval_data.py math220k-dev --profile main150
+.venv/bin/python scripts/prepare_eval_data.py aime --year 24
+.venv/bin/python scripts/prepare_eval_data.py aime --year 25
 ```
 
 ## 检查 SFT 数据
@@ -58,7 +57,6 @@
   --eval-config configs/eval/default.yaml \
   --train-output-dir outputs/stage1_sft \
   --dataset data/eval/global_dev_math500_150.jsonl \
-  --runner vllm_raw \
   --batch-size 6
 ```
 
@@ -66,3 +64,5 @@
 
 - `outputs/stage1_sft/dev_eval/dev_ranking.json`
 - `outputs/stage1_sft/dev_eval/best_checkpoint.json`
+- `outputs/stage1_sft/dev_eval/checkpoint-*/result.json`
+- `outputs/stage1_sft/dev_eval/checkpoint-*/raw.json`

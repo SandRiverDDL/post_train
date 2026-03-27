@@ -21,6 +21,7 @@
 - 调用库层 API
 - 打印摘要日志
 - 结果落盘
+- 按稳定工作流提供少量专名入口；评测数据准备统一收口到 `prepare_eval_data.py`
 
 不负责：
 
@@ -89,11 +90,15 @@
   - 多 response 采样
   - pair 构造与报告
   - pilot 子集导出
-- `eval.py`
-  - `vllm_raw` / `lm_eval` 多 runner 编排
+- `config/`
+  - 按工作流拆分配置 schema 与 loader
+  - 对外继续统一导出 `load_*_config(...)`
+- `eval/`
+  - `vllm_raw` 评测编排
   - sampled AIME task 的多采样聚合
   - 模型输出后处理
   - `math-verify` 判定与指标汇总
+  - 结果按模型路径与任务名分目录落盘
 
 ## 主链路
 
@@ -118,6 +123,11 @@
 -> `check_sft_data`
 -> `train_sft`
 -> `eval_model`
+
+说明：
+
+- `prepare_stage1_data.py` 当前只负责生成 `stage1_train` 与冻结 `dev`
+- `gsm8k`、`math500`、`global_dev`、`AIME`、`math220k_dev` 统一通过 `prepare_eval_data.py` 准备
 
 ### 2. on-policy SFT（当前主线）
 
@@ -210,14 +220,13 @@ query pool
 职责划分：
 
 1. 生成 runner
-   - `vllm_raw` 直接调用 `vLLM`
-   - `lm_eval` 通过 `lm-eval-harness` 编排
-   - sampled pass@1 当前只在 `vllm_raw` 下启用
+   - 当前固定通过本地 `vllm_raw` 链路直接调用 `vLLM`
+   - sampled pass@1 也走同一条链路
 2. 本地后处理
    - 提取最终答案
    - 先做规范化字符串精确判等，再调用 `math-verify`
    - 聚合单样本 accuracy 或多样本 `pass@1`
-   - 写出可比较结果文件
+   - 写出可比较结果文件，默认落到 `outputs/eval/<模型路径>/<task>/`
 
 首版核心指标：
 

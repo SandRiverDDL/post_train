@@ -15,8 +15,6 @@ sys.path.insert(0, str(ROOT / "src"))
 from post_train.config import load_eval_config
 from post_train.eval import (
     build_eval_result,
-    normalize_batch_settings,
-    process_results_stub,
     rate_stderr,
     resolve_model_args,
     resolve_eval_tasks,
@@ -102,20 +100,6 @@ class EvalPipelineTest(unittest.TestCase):
         self.assertEqual(result["predictions"][4]["id"], "2")
         self.assertEqual(result["predictions"][4]["sample_index"], 1)
 
-    def test_normalize_batch_settings_ignores_max_batch_when_not_auto(self) -> None:
-        batch_size, max_batch_size = normalize_batch_settings(6, 12)
-        self.assertEqual(batch_size, 6)
-        self.assertIsNone(max_batch_size)
-
-    def test_normalize_batch_settings_preserves_max_batch_for_auto(self) -> None:
-        batch_size, max_batch_size = normalize_batch_settings("auto", 12)
-        self.assertEqual(batch_size, "auto")
-        self.assertEqual(max_batch_size, 12)
-
-    def test_process_results_stub_does_not_parse_answers(self) -> None:
-        result = process_results_stub({"question": "1+1"}, ["\\boxed{2}"])
-        self.assertEqual(result, {"raw_count": 1.0})
-
     def test_summarize_metrics_for_console_prefers_pass_at_1(self) -> None:
         summary = summarize_metrics_for_console(
             {
@@ -176,10 +160,8 @@ class EvalPipelineTest(unittest.TestCase):
                     [
                         "model_name: Qwen/Qwen2.5-Math-1.5B",
                         "output_dir: outputs/eval",
-                        "runner: vllm_raw",
                         "backend: vllm",
                         "batch_size: auto",
-                        "max_batch_size: 8",
                         "max_new_tokens: 256",
                         "max_seq_length: 1024",
                         "device: cuda",
@@ -204,7 +186,7 @@ class EvalPipelineTest(unittest.TestCase):
             cfg = load_eval_config(config_path)
 
         self.assertEqual(len(cfg.tasks), 3)
-        self.assertEqual(cfg.runner, "vllm_raw")
+        self.assertEqual(cfg.backend, "vllm")
         self.assertEqual(cfg.tasks[0].name, "gsm8k")
         self.assertEqual(cfg.tasks[2].name, "aime25")
         self.assertEqual(cfg.tasks[2].samples_per_problem, 4)
@@ -446,25 +428,6 @@ class EvalPipelineTest(unittest.TestCase):
         self.assertEqual(calls[0]["sampling_params"]["top_p"], 0.95)
         self.assertEqual(result["runner"], "vllm_raw")
         self.assertEqual(len(result["samples"]["toy"]), 2)
-
-    def test_run_harness_eval_rejects_multi_sample_tasks(self) -> None:
-        with self.assertRaisesRegex(ValueError, "samples_per_problem > 1"):
-            from post_train.eval import run_harness_eval
-
-            run_harness_eval(
-                backend="hf",
-                model_args={"pretrained": "Qwen/Qwen2.5-Math-1.5B"},
-                dataset_path="data/eval/aime25_test.jsonl",
-                task_name="aime25",
-                batch_size=1,
-                max_batch_size=None,
-                limit=None,
-                max_gen_toks=128,
-                samples_per_problem=4,
-                sampling_temperature=0.6,
-                sampling_top_p=0.95,
-            )
-
 
 if __name__ == "__main__":
     unittest.main()
