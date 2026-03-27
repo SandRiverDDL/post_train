@@ -36,3 +36,4 @@ class EvalPrediction(BaseModel):
     boxed: bool
     parse_ok: bool
     correct: bool
+    sample_index: int | None = None

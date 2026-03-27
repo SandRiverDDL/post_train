@@ -1,19 +1,27 @@
-# SPEC
-这是已暂停路线，不是当前主线
-## 目标
+# 两阶段 SFT + SIMPO（暂停路线）
 
-当前阶段的目标是建立一个最小可运行的两阶段 `SFT + SIMPO` 数学后训练闭环。
+## 状态
 
-本阶段关注点：
+这条路线当前暂停，不是项目的默认主线。
+
+保留这份文档的目的：
+
+- 记录已经试过的设计与口径
+- 保留后续重新实验时的上下文
+- 避免把旧方案继续写在现行 `docs/SPEC.md` 里误导执行
+
+## 原方案目标
+
+原目标是建立一个最小可运行的两阶段 `SFT + SIMPO` 数学后训练闭环。
+
+原方案关注点：
 
 1. 跑通 `stage1 SFT`
 2. 跑通 `stage2 SFT`
 3. 跑通 `SIMPO`
 4. 用统一评测链路比较三个阶段结果
 
-本阶段不是为了追求最终最优成绩，而是为了证明每个阶段都能被独立执行、评测和比较。
-
-## 当前阶段定义
+## 原方案定义
 
 ### Stage1 SFT
 
@@ -33,7 +41,6 @@
   - 优先使用 `clean_problem`
   - `question_type == "MCQ"` 直接过滤
   - 尾部标准化为单个 canonical `\boxed{...}`，避免重复 boxed
-- 后续可以把去重、去污染、多数据集配额控制接入这一阶段。
 - 当前 stage2 target dev 口径：
   - 不新增 YAML
   - 通过固定 `profile` 生成
@@ -48,55 +55,26 @@
 
 ### SIMPO
 
-- 当前使用 `TRL`。
-- 当前训练器口径：`CPOTrainer(loss_type="simpo")`
-- 当前 MVP 数据构造口径：
+- 使用 `TRL`
+- 训练器口径：`CPOTrainer(loss_type="simpo")`
+- MVP 数据构造口径：
   - 以 `stage1 best checkpoint` 为采样模型
   - 从 `stage1` 同源但未用题目中抽 `800` 条 query
   - 每题采样 `4` 个 responses
   - 优先构造 `correct > incorrect`，不足时回退到 `correct > correct`
   - 目标 `500` 对 pair，但不足不报错
   - 会额外从 full pair 中固定抽出 `150` 对 `pilot` 子集
-- 当前默认训练口径：
+- 默认训练口径：
   - `TRL CPOTrainer(loss_type="simpo")`
   - `4bit + PEFT`
   - `beta=2.0`、`gamma=1.0`
   - 支持 step checkpoint 与 resume
 
-## 当前模型与评测口径
+## 当前评估
 
-- 开发模型：`Qwen/Qwen2.5-Math-1.5B`
-- 正式 benchmark：`GSM8K`、`MATH-500`
-- 正式评测支持两条链路：
-  - `vllm_raw`：直接用 `vLLM` 生成，本地 parser + `math-verify` 判定
-  - `lm_eval`：`lm-eval-harness` 负责编排推理，本地 parser + `math-verify` 判定
-- 当前默认评测链路：`vllm_raw`
-
-当前核心指标：
-
-- `boxed_rate`
-- `parse_success_rate`
-- `normalized_accuracy`
-- `avg_output_tokens`
-
-## Prompt 原则
-
-- SFT 使用更强约束的 prompt，优先学稳格式。
-- 评测使用更短、接近公开基线的 prompt。
-- 统一要求答案中必须包含 `\boxed{...}`。
-
-## 当前边界
-
-本阶段当前不做：
-
-- 自动 early stopping
-- 复杂题目选择策略
-- 复杂轨迹筛选策略
-- 多种偏好训练方法并存
-- 为未来阶段预先设计复杂抽象
-
-## 参数口径
-
-- 当前推荐 prompt、LoRA、SIMPO 超参会在配置中维护。
-- `configs/*.yaml` 是可执行参数真源。
-- `SPEC.md` 只保留本阶段推荐口径与原则，不逐项同步所有细参数。
+- 这条路线已经形成了最小可运行骨架
+- 但尚未证明相对于当前主线更值得继续投入
+- 暂停原因主要是：
+  - `stage2` 的收益不稳定
+  - `SIMPO` 训练成本较高
+  - 当前需要把实验注意力收敛到 `on-policy SFT`

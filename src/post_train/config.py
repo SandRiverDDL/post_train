@@ -26,7 +26,7 @@ class SFTTrainConfig(BaseModel):
     weight_decay: float = 0.01
     logging_steps: int = Field(default=5, ge=1)
     group_by_length: bool = True
-    save_strategy: Literal["epoch", "steps"] = "epoch"
+    save_strategy: Literal["epoch", "steps", "no"] = "epoch"
     save_steps: int | None = Field(default=None, ge=1)
     save_total_limit: int | None = Field(default=None, ge=1)
 
@@ -69,6 +69,9 @@ class EvalTaskConfig(BaseModel):
     dataset_path: Path
     output_path: Path | None = None
     raw_output_path: Path | None = None
+    samples_per_problem: int = Field(default=1, ge=1)
+    sampling_temperature: float | None = Field(default=None, ge=0.0)
+    sampling_top_p: float | None = Field(default=None, gt=0.0, le=1.0)
 
 
 class SimPOConfig(BaseModel):
@@ -141,6 +144,64 @@ class SimPODataConfig(BaseModel):
     cache_dir: str | None = None
 
 
+class OnPolicyDataConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    round_name: str = "round1"
+    query_dataset: str = "UWNSL/MATH_training_split_short_cot"
+    query_split: str = "train"
+    query_config_name: str | None = None
+    query_source: str = "UWNSL/MATH_training_split_short_cot"
+    exclude_paths: list[Path] = Field(
+        default_factory=lambda: [
+            Path("data/stage1_train.jsonl"),
+            Path("data/stage1_dev200.jsonl"),
+            Path("data/eval/global_dev_math500_150.jsonl"),
+            Path("data/eval/gsm8k_test.jsonl"),
+            Path("data/eval/math500_test.jsonl"),
+        ]
+    )
+    query_count: int = Field(default=256, ge=1)
+    responses_per_query: int = Field(default=4, ge=2)
+    generation_model: str = "outputs/stage1_sft/checkpoint-50"
+    base_model_name: str
+    max_model_length: int = Field(default=2048, ge=1)
+    temperature: float = Field(default=0.7, ge=0.0)
+    top_p: float = Field(default=0.95, gt=0.0, le=1.0)
+    max_new_tokens: int = Field(default=768, ge=1)
+    max_completion_tokens: int = Field(default=512, ge=1)
+    min_retained_count: int = Field(default=32, ge=1)
+    gpu_memory_utilization: float = Field(default=0.7, gt=0.0, le=1.0)
+    max_lora_rank: int | None = Field(default=None, ge=1)
+    seed: int = 42
+    query_output_path: Path = Path("data/on_policy/query_pool.jsonl")
+    raw_samples_output_path: Path = Path("data/on_policy/raw_samples.jsonl")
+    retained_output_path: Path = Path("data/on_policy/train.jsonl")
+    report_path: Path = Path("data/on_policy/train.report.json")
+    cache_dir: str | None = None
+
+
+class OnPolicyLoopConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    seed_model: str = "outputs/stage1_sft/checkpoint-50"
+    base_on_policy_data_config: Path = Path("configs/on_policy_data.yaml")
+    base_sft_config: Path = Path("configs/on_policy_sft.yaml")
+    eval_config: Path = Path("configs/eval.yaml")
+    stop_dataset: Path = Path("data/eval/global_dev_math500_150.jsonl")
+    max_rounds: int = Field(default=10, ge=1)
+    patience: int = Field(default=3, ge=1)
+    min_delta: float = Field(default=0.0, ge=0.0)
+    round_base_dir: Path = Path("outputs/on_policy_loop")
+    data_base_dir: Path = Path("data/on_policy_loop")
+    runner: Literal["vllm_raw", "lm_eval"] | None = None
+    backend: Literal["hf", "vllm"] | None = None
+    batch_size: int | str | None = None
+    max_batch_size: int | None = Field(default=None, ge=1)
+    max_new_tokens: int | None = Field(default=None, ge=1)
+    limit: int | None = Field(default=None, ge=1)
+
+
 class Stage2DataConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -199,6 +260,14 @@ def load_simpo_config(path: str | Path) -> SimPOConfig:
 
 def load_simpo_data_config(path: str | Path) -> SimPODataConfig:
     return SimPODataConfig.model_validate(load_yaml_config(path))
+
+
+def load_on_policy_data_config(path: str | Path) -> OnPolicyDataConfig:
+    return OnPolicyDataConfig.model_validate(load_yaml_config(path))
+
+
+def load_on_policy_loop_config(path: str | Path) -> OnPolicyLoopConfig:
+    return OnPolicyLoopConfig.model_validate(load_yaml_config(path))
 
 
 def load_stage2_data_config(path: str | Path) -> Stage2DataConfig:

@@ -24,6 +24,14 @@ def rate_stderr(rate: float, sample_count: int) -> float:
     return math.sqrt(rate * (1.0 - rate) / sample_count)
 
 
+def mean_stderr(values: list[float]) -> float:
+    if len(values) <= 1:
+        return 0.0
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / (len(values) - 1)
+    return math.sqrt(variance / len(values))
+
+
 def _output_tokens(text: str) -> int:
     stripped = text.strip()
     if not stripped:
@@ -33,7 +41,7 @@ def _output_tokens(text: str) -> int:
 
 def build_eval_result(
     rows: Iterable[dict[str, Any]],
-    generations: Iterable[str],
+    generations: Iterable[str | list[str]],
     *,
     model_name: str,
     dataset_name: str,
@@ -41,8 +49,13 @@ def build_eval_result(
     total_seconds: float | None = None,
 ) -> dict[str, Any]:
     row_list = list(rows)
-    generation_list = list(generations)
-    if len(row_list) != len(generation_list):
+    generation_groups: list[list[str]] = []
+    for generation in generations:
+        if isinstance(generation, str):
+            generation_groups.append([generation])
+            continue
+        generation_groups.append([str(item) for item in generation])
+    if len(row_list) != len(generation_groups):
         raise ValueError("rows 与 generations 数量不一致。")
 
     predictions: list[dict[str, Any]] = []
@@ -50,52 +63,69 @@ def build_eval_result(
     parse_total = 0.0
     correct_total = 0.0
     output_token_total = 0
+    pass_at_1_values: list[float] = []
 
-    for row, generation in zip(row_list, generation_list, strict=True):
-        verdict = evaluate_prediction(
-            generation,
-            str(row.get("final_answer", "")),
-            require_boxed=True,
-        )
-        boxed = bool(verdict["boxed"])
-        parse_ok = bool(verdict["parse_ok"])
-        correct = bool(verdict["correct"])
-        boxed_total += float(boxed)
-        parse_total += float(parse_ok)
-        correct_total += float(correct)
-        output_token_total += _output_tokens(generation)
-        prediction = EvalPrediction(
-            id=str(row.get("id", "")),
-            question=str(row.get("question", "")),
-            raw_generation=generation,
-            predicted_answer=str(verdict.get("parsed_answer", "")),
-            expected_answer=str(row.get("final_answer", "")),
-            boxed=boxed,
-            parse_ok=parse_ok,
-            correct=correct,
-        )
-        predictions.append(prediction.model_dump())
+    for row, problem_generations in zip(row_list, generation_groups, strict=True):
+        if not problem_generations:
+            problem_generations = [""]
+        problem_correct_total = 0.0
+        for sample_index, generation in enumerate(problem_generations, start=1):
+            verdict = evaluate_prediction(
+                generation,
+                str(row.get("final_answer", "")),
+                require_boxed=True,
+            )
+            boxed = bool(verdict["boxed"])
+            parse_ok = bool(verdict["parse_ok"])
+            correct = bool(verdict["correct"])
+            boxed_total += float(boxed)
+            parse_total += float(parse_ok)
+            correct_total += float(correct)
+            problem_correct_total += float(correct)
+            output_token_total += _output_tokens(generation)
+            prediction = EvalPrediction(
+                id=str(row.get("id", "")),
+                question=str(row.get("question", "")),
+                raw_generation=generation,
+                predicted_answer=str(verdict.get("parsed_answer", "")),
+                expected_answer=str(row.get("final_answer", "")),
+                boxed=boxed,
+                parse_ok=parse_ok,
+                correct=correct,
+                sample_index=sample_index,
+            )
+            predictions.append(prediction.model_dump())
+        pass_at_1_values.append(problem_correct_total / len(problem_generations))
 
     sample_count = len(row_list)
-    boxed_rate = boxed_total / sample_count if sample_count else 0.0
-    parse_success_rate = parse_total / sample_count if sample_count else 0.0
-    normalized_accuracy = correct_total / sample_count if sample_count else 0.0
-    avg_output_tokens = output_token_total / sample_count if sample_count else 0.0
+    total_generations = len(predictions)
+    boxed_rate = boxed_total / total_generations if total_generations else 0.0
+    parse_success_rate = parse_total / total_generations if total_generations else 0.0
+    pass_at_1 = sum(pass_at_1_values) / sample_count if sample_count else 0.0
+    avg_output_tokens = output_token_total / total_generations if total_generations else 0.0
+    samples_per_problem = (total_generations / sample_count) if sample_count else 0.0
+    samples_per_second = (sample_count / total_seconds) if total_seconds and total_seconds > 0 else 0.0
+    generations_per_second = (total_generations / total_seconds) if total_seconds and total_seconds > 0 else 0.0
     return {
         "metrics": {
             "model": model_name,
             "dataset": dataset_name,
             "runner": runner or "",
             "samples": sample_count,
+            "total_generations": total_generations,
+            "samples_per_problem": samples_per_problem,
             "boxed_rate": boxed_rate,
-            "boxed_rate_stderr": rate_stderr(boxed_rate, sample_count),
+            "boxed_rate_stderr": rate_stderr(boxed_rate, total_generations),
             "parse_success_rate": parse_success_rate,
-            "parse_success_rate_stderr": rate_stderr(parse_success_rate, sample_count),
-            "normalized_accuracy": normalized_accuracy,
-            "normalized_accuracy_stderr": rate_stderr(normalized_accuracy, sample_count),
+            "parse_success_rate_stderr": rate_stderr(parse_success_rate, total_generations),
+            "pass_at_1": pass_at_1,
+            "pass_at_1_stderr": mean_stderr(pass_at_1_values),
+            "normalized_accuracy": pass_at_1,
+            "normalized_accuracy_stderr": mean_stderr(pass_at_1_values),
             "avg_output_tokens": avg_output_tokens,
             "total_seconds": total_seconds or 0.0,
-            "samples_per_second": (sample_count / total_seconds) if total_seconds and total_seconds > 0 else 0.0,
+            "samples_per_second": samples_per_second,
+            "generations_per_second": generations_per_second,
         },
         "predictions": predictions,
     }
@@ -195,7 +225,12 @@ def run_harness_eval(
     max_batch_size: int | None,
     limit: int | None,
     max_gen_toks: int,
+    samples_per_problem: int = 1,
+    sampling_temperature: float | None = None,
+    sampling_top_p: float | None = None,
 ) -> dict[str, Any]:
+    if samples_per_problem > 1:
+        raise ValueError("lm_eval runner 暂不支持 samples_per_problem > 1；请改用 vllm_raw。")
     batch_size, max_batch_size = normalize_batch_settings(batch_size, max_batch_size)
     task_manager = TaskManager(include_defaults=False)
     task_manager.task_index[task_name] = {
@@ -229,6 +264,9 @@ def run_vllm_raw_eval(
     batch_size: int | str,
     limit: int | None,
     max_gen_toks: int,
+    samples_per_problem: int = 1,
+    sampling_temperature: float | None = None,
+    sampling_top_p: float | None = None,
 ) -> dict[str, Any]:
     from vllm import LLM, SamplingParams
     from vllm.lora.request import LoRARequest
@@ -254,9 +292,18 @@ def run_vllm_raw_eval(
         llm_kwargs["max_lora_rank"] = max_lora_rank
 
     llm = LLM(model=model_name, **llm_kwargs)
+    if samples_per_problem > 1:
+        temperature = 0.6 if sampling_temperature is None else sampling_temperature
+        top_p = 0.95 if sampling_top_p is None else sampling_top_p
+        if temperature <= 0.0:
+            raise ValueError("samples_per_problem > 1 时 temperature 必须大于 0。")
+    else:
+        temperature = 0.0
+        top_p = 1.0
     sampling_params = SamplingParams(
-        n=1,
-        temperature=0.0,
+        n=samples_per_problem,
+        temperature=temperature,
+        top_p=top_p,
         max_tokens=max_gen_toks,
         stop=["</s>", "<|im_end|>"],
     )
@@ -289,6 +336,7 @@ def run_vllm_raw_eval(
     return {
         "runner": "vllm_raw",
         "task_name": task_name,
+        "samples_per_problem": samples_per_problem,
         "samples": {task_name: samples},
         "timing": {"total_seconds": total_seconds},
     }
@@ -342,7 +390,12 @@ def result_from_vllm_raw_logs(
 ) -> dict[str, Any]:
     rows = read_jsonl(dataset_path)
     samples = raw_result.get("samples", {}).get(task_name, [])
-    generations = [str(sample.get("resps", [""])[0] if sample.get("resps") else "") for sample in samples]
+    generations = [
+        [str(generation) for generation in sample.get("resps", [])]
+        if sample.get("resps")
+        else [""]
+        for sample in samples
+    ]
     total_seconds = float(raw_result.get("timing", {}).get("total_seconds", 0.0))
     return build_eval_result(
         rows[: len(generations)],
@@ -371,6 +424,24 @@ def preview_logged_samples(result: dict[str, Any], *, count: int = 3) -> str:
             )
         )
     return "\n".join(previews)
+
+
+def summarize_metrics_for_console(metrics: dict[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "model": metrics.get("model"),
+        "dataset": metrics.get("dataset"),
+        "samples": metrics.get("samples"),
+    }
+    if "pass_at_1" in metrics:
+        summary["pass_at_1"] = metrics.get("pass_at_1")
+        summary["pass_at_1_stderr"] = metrics.get("pass_at_1_stderr")
+    else:
+        summary["normalized_accuracy"] = metrics.get("normalized_accuracy")
+        summary["normalized_accuracy_stderr"] = metrics.get("normalized_accuracy_stderr")
+    summary["boxed_rate"] = metrics.get("boxed_rate")
+    summary["parse_success_rate"] = metrics.get("parse_success_rate")
+    summary["avg_output_tokens"] = metrics.get("avg_output_tokens")
+    return summary
 
 
 def write_eval_result(path: str | Path, result: dict[str, Any]) -> Path:

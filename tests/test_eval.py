@@ -23,6 +23,7 @@ from post_train.eval import (
     resolve_task_output_paths,
     result_from_vllm_raw_logs,
     run_vllm_raw_eval,
+    summarize_metrics_for_console,
     write_raw_eval_result,
 )
 
@@ -63,14 +64,43 @@ class EvalPipelineTest(unittest.TestCase):
         self.assertEqual(result["metrics"]["model"], "outputs/demo")
         self.assertEqual(result["metrics"]["dataset"], "data/eval/toy.jsonl")
         self.assertEqual(result["metrics"]["samples"], 2)
+        self.assertEqual(result["metrics"]["total_generations"], 2)
         self.assertEqual(result["metrics"]["boxed_rate"], 0.5)
         self.assertEqual(result["metrics"]["parse_success_rate"], 0.5)
         self.assertEqual(result["metrics"]["normalized_accuracy"], 0.5)
+        self.assertEqual(result["metrics"]["pass_at_1"], 0.5)
         self.assertIn("avg_output_tokens", result["metrics"])
         self.assertEqual(len(result["predictions"]), 2)
         self.assertEqual(result["predictions"][0]["predicted_answer"], "2")
         self.assertTrue(result["predictions"][0]["boxed"])
+        self.assertEqual(result["predictions"][0]["sample_index"], 1)
         self.assertFalse(result["predictions"][1]["parse_ok"])
+
+    def test_build_eval_result_supports_multi_sample_pass_at_1(self) -> None:
+        rows = [
+            {"id": "1", "question": "q1", "final_answer": "2"},
+            {"id": "2", "question": "q2", "final_answer": "4"},
+        ]
+        generations = [
+            ["\\boxed{2}", "wrong", "\\boxed{2}", "wrong"],
+            ["wrong", "wrong", "wrong", "\\boxed{4}"],
+        ]
+
+        result = build_eval_result(
+            rows,
+            generations,
+            model_name="outputs/demo",
+            dataset_name="data/eval/aime25_test.jsonl",
+        )
+
+        self.assertEqual(result["metrics"]["samples"], 2)
+        self.assertEqual(result["metrics"]["total_generations"], 8)
+        self.assertEqual(result["metrics"]["samples_per_problem"], 4.0)
+        self.assertAlmostEqual(result["metrics"]["pass_at_1"], 0.375)
+        self.assertAlmostEqual(result["metrics"]["normalized_accuracy"], 0.375)
+        self.assertEqual(len(result["predictions"]), 8)
+        self.assertEqual(result["predictions"][4]["id"], "2")
+        self.assertEqual(result["predictions"][4]["sample_index"], 1)
 
     def test_normalize_batch_settings_ignores_max_batch_when_not_auto(self) -> None:
         batch_size, max_batch_size = normalize_batch_settings(6, 12)
@@ -85,6 +115,58 @@ class EvalPipelineTest(unittest.TestCase):
     def test_process_results_stub_does_not_parse_answers(self) -> None:
         result = process_results_stub({"question": "1+1"}, ["\\boxed{2}"])
         self.assertEqual(result, {"raw_count": 1.0})
+
+    def test_summarize_metrics_for_console_prefers_pass_at_1(self) -> None:
+        summary = summarize_metrics_for_console(
+            {
+                "pass_at_1": 0.1,
+                "pass_at_1_stderr": 0.02,
+                "normalized_accuracy": 0.1,
+                "normalized_accuracy_stderr": 0.02,
+                "boxed_rate": 0.95,
+                "parse_success_rate": 0.94,
+                "avg_output_tokens": 400.0,
+                "samples": 30,
+            }
+        )
+        self.assertEqual(
+            summary,
+            {
+                "model": None,
+                "dataset": None,
+                "samples": 30,
+                "pass_at_1": 0.1,
+                "pass_at_1_stderr": 0.02,
+                "boxed_rate": 0.95,
+                "parse_success_rate": 0.94,
+                "avg_output_tokens": 400.0,
+            },
+        )
+
+    def test_summarize_metrics_for_console_falls_back_to_accuracy(self) -> None:
+        summary = summarize_metrics_for_console(
+            {
+                "normalized_accuracy": 0.6,
+                "normalized_accuracy_stderr": 0.03,
+                "boxed_rate": 0.98,
+                "parse_success_rate": 0.97,
+                "avg_output_tokens": 120.0,
+                "samples": 150,
+            }
+        )
+        self.assertEqual(
+            summary,
+            {
+                "model": None,
+                "dataset": None,
+                "samples": 150,
+                "normalized_accuracy": 0.6,
+                "normalized_accuracy_stderr": 0.03,
+                "boxed_rate": 0.98,
+                "parse_success_rate": 0.97,
+                "avg_output_tokens": 120.0,
+            },
+        )
 
     def test_load_eval_config_supports_task_list(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -110,16 +192,24 @@ class EvalPipelineTest(unittest.TestCase):
                         "    dataset_path: data/eval/gsm8k_test.jsonl",
                         "  - name: math500",
                         "    dataset_path: data/eval/math500_test.jsonl",
+                        "  - name: aime25",
+                        "    dataset_path: data/eval/aime25_test.jsonl",
+                        "    samples_per_problem: 4",
+                        "    sampling_temperature: 0.6",
+                        "    sampling_top_p: 0.95",
                     ]
                 ),
                 encoding="utf-8",
             )
             cfg = load_eval_config(config_path)
 
-        self.assertEqual(len(cfg.tasks), 2)
+        self.assertEqual(len(cfg.tasks), 3)
         self.assertEqual(cfg.runner, "vllm_raw")
         self.assertEqual(cfg.tasks[0].name, "gsm8k")
-        self.assertEqual(cfg.tasks[1].name, "math500")
+        self.assertEqual(cfg.tasks[2].name, "aime25")
+        self.assertEqual(cfg.tasks[2].samples_per_problem, 4)
+        self.assertEqual(cfg.tasks[2].sampling_temperature, 0.6)
+        self.assertEqual(cfg.tasks[2].sampling_top_p, 0.95)
         self.assertEqual(cfg.max_lora_rank, 32)
 
     def test_resolve_eval_tasks_filters_requested_names(self) -> None:
@@ -143,6 +233,20 @@ class EvalPipelineTest(unittest.TestCase):
 
         tasks = resolve_eval_tasks(cfg, requested_tasks=["math500"])
         self.assertEqual([task.name for task in tasks], ["math500"])
+
+    def test_load_eval_aime_config_supports_both_tasks(self) -> None:
+        cfg = load_eval_config("configs/eval_aime.yaml")
+
+        self.assertEqual([task.name for task in cfg.tasks], ["aime24", "aime25"])
+        self.assertEqual(cfg.tasks[0].samples_per_problem, 4)
+        self.assertEqual(cfg.tasks[1].sampling_temperature, 0.6)
+
+    def test_resolve_eval_tasks_filters_aime_tasks_from_combined_config(self) -> None:
+        cfg = load_eval_config("configs/eval_aime.yaml")
+
+        tasks = resolve_eval_tasks(cfg, requested_tasks=["aime24"])
+
+        self.assertEqual([task.name for task in tasks], ["aime24"])
 
     def test_write_raw_eval_result_serializes_callable_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -221,8 +325,10 @@ class EvalPipelineTest(unittest.TestCase):
 
         self.assertEqual(result["metrics"]["runner"], "vllm_raw")
         self.assertEqual(result["metrics"]["samples"], 2)
+        self.assertEqual(result["metrics"]["total_generations"], 2)
         self.assertEqual(result["metrics"]["boxed_rate"], 0.5)
         self.assertEqual(result["metrics"]["samples_per_second"], 1.0)
+        self.assertEqual(result["metrics"]["generations_per_second"], 1.0)
         self.assertEqual(len(result["predictions"]), 2)
 
     def test_resolve_task_output_paths_adds_runner_suffix(self) -> None:
@@ -267,6 +373,7 @@ class EvalPipelineTest(unittest.TestCase):
             class FakeSamplingParams:
                 def __init__(self, **kwargs) -> None:
                     self.kwargs = kwargs
+                    calls.append({"sampling_params": kwargs})
 
             fake_vllm = ModuleType("vllm")
             fake_vllm.LLM = FakeLLM
@@ -294,12 +401,35 @@ class EvalPipelineTest(unittest.TestCase):
                     batch_size=1,
                     limit=None,
                     max_gen_toks=128,
+                    samples_per_problem=4,
+                    sampling_temperature=0.6,
+                    sampling_top_p=0.95,
                 )
 
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["prompt_count"], 2)
+        self.assertEqual(calls[1]["prompt_count"], 2)
+        self.assertEqual(calls[0]["sampling_params"]["n"], 4)
+        self.assertEqual(calls[0]["sampling_params"]["temperature"], 0.6)
+        self.assertEqual(calls[0]["sampling_params"]["top_p"], 0.95)
         self.assertEqual(result["runner"], "vllm_raw")
         self.assertEqual(len(result["samples"]["toy"]), 2)
+
+    def test_run_harness_eval_rejects_multi_sample_tasks(self) -> None:
+        with self.assertRaisesRegex(ValueError, "samples_per_problem > 1"):
+            from post_train.eval import run_harness_eval
+
+            run_harness_eval(
+                backend="hf",
+                model_args={"pretrained": "Qwen/Qwen2.5-Math-1.5B"},
+                dataset_path="data/eval/aime25_test.jsonl",
+                task_name="aime25",
+                batch_size=1,
+                max_batch_size=None,
+                limit=None,
+                max_gen_toks=128,
+                samples_per_problem=4,
+                sampling_temperature=0.6,
+                sampling_top_p=0.95,
+            )
 
 
 if __name__ == "__main__":

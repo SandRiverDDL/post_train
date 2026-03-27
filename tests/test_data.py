@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.data import (
+    prepare_benchmark_artifact,
     make_sft_record,
     prepare_sampled_eval_artifact,
     sample_rows,
@@ -71,6 +72,21 @@ class DataPipelineTest(unittest.TestCase):
         self.assertIn("question", rows[0])
         self.assertIn("final_answer", rows[0])
         self.assertEqual(rows[0]["meta"]["source"], "toy")
+
+    def test_prepare_benchmark_artifact_supports_aime25_fields(self) -> None:
+        raw_rows = [
+            {"id": "a-1", "problem": "Compute 1+1.", "answer": "2"},
+        ]
+        with patch("post_train.data.load_dataset_rows", return_value=raw_rows):
+            rows = prepare_benchmark_artifact(
+                dataset_name="math-ai/aime25",
+                split="test",
+                source="aime25",
+            )
+        self.assertEqual(rows[0]["id"], "a-1")
+        self.assertEqual(rows[0]["question"], "Compute 1+1.")
+        self.assertEqual(rows[0]["final_answer"], "2")
+        self.assertEqual(rows[0]["meta"]["source"], "aime25")
 
     def test_summarize_sft_dataset_counts_metrics(self) -> None:
         rows = [

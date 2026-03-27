@@ -41,6 +41,11 @@ class AnswerUtilsTest(unittest.TestCase):
     def test_equivalence_latex_spacing(self) -> None:
         self.assertTrue(are_equivalent("The answer is: \\frac{1}{2}", "0.5"))
 
+    def test_equivalence_exact_latex_match_without_parser_support(self) -> None:
+        self.assertTrue(are_equivalent("-\\frac{\\pi}{6}", "-\\frac{\\pi}{6}"))
+        self.assertTrue(are_equivalent("\\cot x", "\\cot x"))
+        self.assertTrue(are_equivalent("[-2, 7]", "[-2, 7]"))
+
     def test_has_boxed_final_answer(self) -> None:
         self.assertTrue(has_boxed_final_answer("\\boxed{42}"))
 

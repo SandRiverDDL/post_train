@@ -2,7 +2,7 @@
 
 ## 目标
 
-当前仓库只为两阶段 `SFT + SIMPO` 建立最小可运行闭环，不追求一次性覆盖所有增强方向。
+当前仓库当前主线转向 `on-policy SFT`，同时保留旧的两阶段 `SFT + SIMPO` 代码与文档作为暂停中的候选路线。
 
 核心设计目标：
 
@@ -51,33 +51,47 @@
   - 数据清洗
   - 数据导出
   - 数据校验
+- `on_policy_data.py`
+  - on-policy query 池构造
+  - 单轮多 response 采样
+  - retained SFT 数据导出
+  - retained 报告统计
+- `on_policy_loop.py`
+  - 多轮 on-policy 编排
+  - 轮间 holdout early stop
+  - round history 与 final summary
 - `stage2_data.py`
+  - 暂停中的候选路线模块
   - source-specific filters
   - generic filters
   - 尾部标准化为单个 canonical boxed
   - token 长度分桶
   - 按配额混采 stage2 数据
 - `math220k_dev.py`
+  - 暂停中的候选路线辅助模块
   - 复用 `math220k` 清洗与校验
   - 固定 profile 分桶抽样
   - 导出 stage2 target dev
 - `sft.py`
-  - stage1 / stage2 SFT 共用训练逻辑
+  - 当前主线与候选路线共用 SFT 训练逻辑
 - `sft_selection.py`
   - checkpoint 扫描
   - dev 批量评测
   - best checkpoint 选择
 - `simpo.py`
+  - 暂停中的候选路线模块
   - TRL `CPOTrainer(loss_type=simpo)` 封装
   - 4bit + PEFT 加载
   - checkpoint / resume 编排
 - `simpo_data.py`
+  - 暂停中的候选路线模块
   - query 池构造
   - 多 response 采样
   - pair 构造与报告
   - pilot 子集导出
 - `eval.py`
   - `vllm_raw` / `lm_eval` 多 runner 编排
+  - sampled AIME task 的多采样聚合
   - 模型输出后处理
   - `math-verify` 判定与指标汇总
 
@@ -105,7 +119,33 @@
 -> `train_sft`
 -> `eval_model`
 
-### 2. Stage2 SFT
+### 2. on-policy SFT（当前主线）
+
+输入：
+
+- `stage1` 基础模型或 checkpoint
+- on-policy 生成出的候选数据
+
+输出：
+
+- on-policy SFT 数据
+- 新的模型目录
+- 评测结果
+
+说明：
+
+- 当前首版实现为“单轮数据准备 + 复用既有训练与评测入口手动串多轮”
+- 当前也支持单脚本自动循环：
+  - prepare -> train -> holdout eval
+  - 每轮直接用该轮最终模型继续
+  - 轮间用 `global_dev_math500_150` 做 early stop
+- query 默认来自 `stage1` 同源题池，排除 `stage1_train`、`stage1_dev200` 与 eval/dev
+- 自动循环按 epoch 洗牌消费 query 池，避免前几轮反复命中同一小闭集
+- 生成使用 `SFT prompt`
+- 每题默认采样 `4` 条，仅保留 `1` 条最短且答案正确、长度不过阈值的回答
+- 每轮训练结束后，直接复用该轮输出模型进入下一轮
+
+### 3. 两阶段 SFT（暂停候选路线）
 
 输入：
 
@@ -133,7 +173,7 @@ Math220K
 -> 固定 profile 分桶抽样
 -> eval JSONL
 
-### 3. SIMPO
+### 4. SIMPO（暂停候选路线）
 
 输入：
 
@@ -166,10 +206,11 @@ query pool
 1. 生成 runner
    - `vllm_raw` 直接调用 `vLLM`
    - `lm_eval` 通过 `lm-eval-harness` 编排
+   - sampled pass@1 当前只在 `vllm_raw` 下启用
 2. 本地后处理
    - 提取最终答案
-   - 调用 `math-verify`
-   - 聚合指标
+   - 先做规范化字符串精确判等，再调用 `math-verify`
+   - 聚合单样本 accuracy 或多样本 `pass@1`
    - 写出可比较结果文件
 
 首版核心指标：
@@ -177,6 +218,7 @@ query pool
 - `boxed_rate`
 - `parse_success_rate`
 - `normalized_accuracy`
+- `pass_at_1`
 - `avg_output_tokens`
 
 ## 扩展原则

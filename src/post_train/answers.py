@@ -121,14 +121,20 @@ def parse_math_answer(text: str | None):
 def are_equivalent(predicted: str | None, expected: str | None) -> bool:
     if not predicted or not expected:
         return False
+    left = normalize_answer(predicted)
+    right = normalize_answer(expected)
+    if left and right and left == right:
+        return True
     try:
-        return bool(verify(parse_math_answer(expected), parse_math_answer(predicted)))
+        expected_parsed = parse_math_answer(expected)
+        predicted_parsed = parse_math_answer(predicted)
+        if expected_parsed and predicted_parsed:
+            return bool(verify(expected_parsed, predicted_parsed))
     except Exception:
-        left = normalize_answer(predicted)
-        right = normalize_answer(expected)
-        if not left or not right:
-            return False
-        return left == right
+        pass
+    if not left or not right:
+        return False
+    return left == right
 
 
 def evaluate_prediction(

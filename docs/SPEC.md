@@ -2,81 +2,76 @@
 
 ## 目标
 
-当前阶段的目标是建立一个最小可运行的两阶段 `SFT + SIMPO` 数学后训练闭环。
+当前阶段的目标是把项目主线切换为 `on-policy SFT`，并围绕这条主线建立最小可运行闭环。
 
 本阶段关注点：
 
-1. 跑通 `stage1 SFT`
-2. 跑通 `stage2 SFT`
-3. 跑通 `SIMPO`
-4. 用统一评测链路比较三个阶段结果
+1. 保持 `stage1 SFT` 作为稳定起点
+2. 设计并验证 `on-policy` 数据生成与筛选链路
+3. 用统一评测链路比较 `stage1` 与 `on-policy SFT` 的结果
+4. 判断 `on-policy SFT` 是否比已有离线增量路线更值得继续投入
 
-本阶段不是为了追求最终最优成绩，而是为了证明每个阶段都能被独立执行、评测和比较。
+本阶段不是为了同时推进所有候选路线，而是为了给当前主线提供清晰、可执行、可比较的实验口径。
 
 ## 当前阶段定义
 
 ### Stage1 SFT
 
-- 用一份基础数学 SFT 数据训练第一阶段模型。
+- 继续作为当前主线的基础模型来源。
 - 当前数据口径：`UWNSL/MATH_training_split_short_cot`
 - 当前首版训练规模：`2000`
 - `dev`：从同源数据中切出 `200` 条并冻结
 - 当前 checkpoint 选择口径：`2 epoch`、`save_steps=25`、训练结束后统一在 `dev200` 上按 `normalized_accuracy` 选 best checkpoint
 
-### Stage2 SFT
+### on-policy SFT
 
-- 定义为“在另一份 SFT 数据上继续训练一次”。
-- 当前绑定到一条“清洗与筛选”数据管线，而不是模型采样管线。
-- 当前主数据源：`qingy2024/OpenR1-Math-220k-Cleaned`
-- 当前 MVP 配比：`50%` 随机 `stage1_train` + `35%` `math220k_short(<768)` + `15%` `math220k_long(<1380)`
-- 当前 `math220k` 绑定规则：
-  - 优先使用 `clean_problem`
-  - `question_type == "MCQ"` 直接过滤
-  - 尾部标准化为单个 canonical `\boxed{...}`，避免重复 boxed
-- 后续可以把去重、去污染、多数据集配额控制接入这一阶段。
-- 当前 stage2 target dev 口径：
-  - 不新增 YAML
-  - 通过固定 `profile` 生成
-  - 第一版只内置 `main150` 与 `short150`
-- 当前 stage2 训练建议：
-  - 从 `stage1 best checkpoint` 继续训练
-  - 学习率优先用 `2e-5`
-  - 避免继续使用 `1e-4` 这类对第二阶段过于激进的配置
-- 当前实验现象：
-  - `stage2` 会让模型更贴近 `math220k` 分布
-  - 但未必带来中立 benchmark 的提升，当前要重点监控 `GSM8K` 这类 transfer 下降
+- 定义为“从当前模型出发生成新样本，再经过筛选后继续做 SFT”。
+- 当前首版口径：
+  - query 来源：`UWNSL/MATH_training_split_short_cot` 同源题池
+  - 默认排除 `stage1_train`、`stage1_dev200` 与各类 eval/dev 集
+  - 生成 prompt 复用当前 `SFT prompt`
+  - 每轮默认抽 `256` 题、每题采样 `4` 条
+  - 样本筛选统一使用本地 parser + `math-verify`
+  - 保留规则固定为：`parse_success=True`、`is_correct=True`、`completion_len<=512`
+  - 每题最多保留 `1` 条，若多条满足则保留最短正确回答
+  - 继续复用现有 `train_sft.py` / `eval_model.py`
+  - 支持自动循环脚本：每轮直接使用该轮最终模型进入下一轮，轮间用 `global_dev_math500_150` 上的 `normalized_accuracy` 做早停
+  - 自动循环的 query 采样按 epoch 洗牌消费：先无放回扫完整个 query 池，耗尽后重洗继续
+  - 当前默认早停口径：`patience=3`、`min_delta=0.0`
+- 当前首版边界：
+  - 只实现 `pure_onpolicy`
+  - 不实现复杂 prompt 去重或模糊去重
+  - 不实现每题保留多条正确轨迹
+  - retained 样本过少时直接失败，不做自动补采样
 
-### SIMPO
+### 暂停路线
 
-- 当前使用 `TRL`。
-- 当前训练器口径：`CPOTrainer(loss_type="simpo")`
-- 当前 MVP 数据构造口径：
-  - 以 `stage1 best checkpoint` 为采样模型
-  - 从 `stage1` 同源但未用题目中抽 `800` 条 query
-  - 每题采样 `4` 个 responses
-  - 优先构造 `correct > incorrect`，不足时回退到 `correct > correct`
-  - 目标 `500` 对 pair，但不足不报错
-  - 会额外从 full pair 中固定抽出 `150` 对 `pilot` 子集
-- 当前默认训练口径：
-  - `TRL CPOTrainer(loss_type="simpo")`
-  - `4bit + PEFT`
-  - `beta=2.0`、`gamma=1.0`
-  - 支持 step checkpoint 与 resume
+- 两阶段 `SFT + SIMPO` 当前不是主线。
+- 相关设计、观察和保留原因迁到：
+  - `docs/experiments/two-stage-sft-simpo.md`
 
 ## 当前模型与评测口径
 
 - 开发模型：`Qwen/Qwen2.5-Math-1.5B`
 - 正式 benchmark：`GSM8K`、`MATH-500`
+- 额外支持 opt-in 的 sampled benchmark 组：`AIME24`、`AIME25`
 - 正式评测支持两条链路：
   - `vllm_raw`：直接用 `vLLM` 生成，本地 parser + `math-verify` 判定
   - `lm_eval`：`lm-eval-harness` 负责编排推理，本地 parser + `math-verify` 判定
 - 当前默认评测链路：`vllm_raw`
+- `AIME24/AIME25` 当前口径：
+  - 不进入默认 `configs/eval.yaml`
+  - 通过单独 `configs/eval_aime.yaml` opt-in
+  - 每题默认采样 `4` 次
+  - 主指标为严格 `pass@1 = mean(correct_count / 4)`
+  - sampled pass@1 当前只支持 `vllm_raw`
 
 当前核心指标：
 
 - `boxed_rate`
 - `parse_success_rate`
 - `normalized_accuracy`
+- `pass_at_1`
 - `avg_output_tokens`
 
 ## Prompt 原则
@@ -89,14 +84,14 @@
 
 本阶段当前不做：
 
-- 自动 early stopping
+- 同时把 `on-policy SFT` 与两阶段 `SFT + SIMPO` 都当作现行主线
 - 复杂题目选择策略
 - 复杂轨迹筛选策略
-- 多种偏好训练方法并存
+- `mixed_onpolicy`
 - 为未来阶段预先设计复杂抽象
 
 ## 参数口径
 
-- 当前推荐 prompt、LoRA、SIMPO 超参会在配置中维护。
+- 当前推荐 prompt、LoRA、训练与评测超参会在配置中维护。
 - `configs/*.yaml` 是可执行参数真源。
-- `SPEC.md` 只保留本阶段推荐口径与原则，不逐项同步所有细参数。
+- `SPEC.md` 只保留当前主线推荐口径与原则，不逐项同步所有细参数。

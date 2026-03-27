@@ -41,6 +41,18 @@
 - `data/eval/math220k_dev_main150.jsonl`
 - `data/eval/math220k_dev_main150.report.json`
 
+如果要准备 `AIME24` 或 `AIME25` 本地评测集：
+
+```bash
+.venv/bin/python scripts/prepare_aime_eval.py --year 24
+.venv/bin/python scripts/prepare_aime_eval.py --year 25
+```
+
+默认输出：
+
+- `data/eval/aime24_test.jsonl`
+- `data/eval/aime25_test.jsonl`
+
 ## 2. 检查 SFT 数据
 
 ```bash
@@ -124,8 +136,103 @@
 - 评测 LoRA adapter 时，`max_lora_rank` 必须大于等于训练时的 `lora_rank`
 - 两条链路复用同一个评测 prompt，只比较编排层差异
 - 结果文件会带上 runner 后缀，如 `gsm8k.vllm_raw.json`
+- 终端默认只打印核心字段；完整 metrics 仍保留在结果 JSON 中
+- `AIME24/AIME25` 默认不在 `configs/eval.yaml` 里，需要用单独配置
+- `AIME24/AIME25` 当前只在 `vllm_raw` 下支持每题多采样与 `pass@1`
 
-## 6. 准备 stage2 数据
+运行合并版 `AIME24/AIME25` sampled pass@1：
+
+```bash
+.venv/bin/python scripts/eval_model.py --config configs/eval_aime.yaml
+```
+
+如果只想单独跑 `AIME24`：
+
+```bash
+.venv/bin/python scripts/eval_model.py \
+  --config configs/eval_aime.yaml \
+  --tasks aime24
+```
+
+## 6. 准备单轮 on-policy SFT 数据
+
+```bash
+.venv/bin/python scripts/prepare_on_policy_sft_data.py --config configs/on_policy_data.yaml
+```
+
+默认产物：
+
+- `data/on_policy/query_pool.round1.jsonl`
+- `data/on_policy/raw_samples.round1.jsonl`
+- `data/on_policy/train.round1.jsonl`
+- `data/on_policy/train.round1.report.json`
+
+当前默认规则：
+
+- 使用 `stage1 best checkpoint` 采样
+- query 来自 `stage1` 同源题池
+- 默认排除 `stage1_train`、`stage1_dev200` 与各类 eval/dev 集
+- 每题采样 `4` 个 responses
+- 只保留 `parse_success=True`、`correct=True`、长度不超过 `512` 的回答
+- 每题最多保留 `1` 条，若多条满足则保留最短正确回答
+- retained 条数低于阈值时直接失败，不自动补采样
+
+## 7. 运行单轮 on-policy SFT
+
+```bash
+.venv/bin/python scripts/train_sft.py --config configs/on_policy_sft.yaml
+```
+
+当前默认会：
+
+- 从上一阶段 best checkpoint 继续训练
+- 在 retained 数据上训练 `2 epoch`
+- 按 `epoch` 保存 checkpoint
+- 默认 `learning_rate=1e-5`
+
+## 8. 评测单轮 on-policy 最终模型
+
+```bash
+.venv/bin/python scripts/eval_model.py \
+  --config configs/eval.yaml \
+  --runner vllm_raw \
+  --model outputs/on_policy_sft/round1 \
+  --dataset data/eval/global_dev_math500_150.jsonl \
+  --batch-size 6 \
+  --output outputs/eval_on_policy_round1_global_dev.json
+```
+
+建议后续手动循环：
+
+1. 准备 round-k retained 数据
+2. 训练 round-k SFT
+3. 用该轮最终模型跑 `gsm8k` / `math500`
+4. 把该轮最终模型作为下一轮 `generation_model`
+
+## 9. 自动运行多轮 on-policy SFT
+
+```bash
+.venv/bin/python scripts/run_on_policy_loop.py --config configs/on_policy_loop.yaml
+```
+
+当前默认会：
+
+- 从 `seed_model` 开始进入 round1
+- 每轮自动串起 `prepare -> train -> holdout eval`
+- query 按 epoch 洗牌消费，先无放回扫完整个池，再重洗继续
+- 每轮不保存轮内 checkpoint，也不做 best checkpoint selection
+- 轮间用 `data/eval/global_dev_math500_150.jsonl` 上的 `normalized_accuracy` 判断是否继续
+- 连续 `3` 轮没有更高的 holdout accuracy 就停止
+- 默认最多跑 `10` 轮
+
+默认产物：
+
+- `outputs/on_policy_loop/history.json`
+- `outputs/on_policy_loop/final_summary.json`
+- `outputs/on_policy_loop/round*/round_summary.json`
+- `data/on_policy_loop/round*/`
+
+## 10. 准备 stage2 数据
 
 ```bash
 .venv/bin/python scripts/prepare_stage2_data.py --config configs/stage2_data.yaml
@@ -144,7 +251,7 @@
 - `math220k` 中 `question_type == "MCQ"` 直接过滤
 - `math220k` 的 `solution` 会被标准化为单个 `\boxed{...}` 尾部，不再直接重复追加 boxed
 
-## 7. 运行 stage2 SFT
+## 10. 运行 stage2 SFT
 
 ```bash
 .venv/bin/python scripts/train_sft.py --config configs/stage2_sft.yaml
@@ -160,7 +267,7 @@
   - 是否在 `math220k_dev_main150` 上更贴近目标分布
   - 是否同时伤害 `GSM8K` 这类 transfer benchmark
 
-## 8. 运行 SIMPO
+## 11. 运行 SIMPO
 
 先准备 full preference 数据：
 

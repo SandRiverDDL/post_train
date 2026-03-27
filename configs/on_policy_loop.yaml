@@ -1,0 +1,14 @@
+seed_model: outputs/stage1_sft/checkpoint-50
+base_on_policy_data_config: configs/on_policy_data.yaml
+base_sft_config: configs/on_policy_sft.yaml
+eval_config: configs/eval.yaml
+stop_dataset: data/eval/global_dev_math500_150.jsonl
+max_rounds: 10
+patience: 3
+min_delta: 0.0
+round_base_dir: outputs/on_policy_loop
+data_base_dir: data/on_policy_loop
+runner: vllm_raw
+backend: vllm
+batch_size: 6
+max_new_tokens: 1536

@@ -19,6 +19,7 @@ from post_train.eval import (
     result_from_vllm_raw_logs,
     run_harness_eval,
     run_vllm_raw_eval,
+    summarize_metrics_for_console,
     write_eval_result,
     write_raw_eval_result,
 )
@@ -86,6 +87,9 @@ def main() -> None:
                 max_batch_size=max_batch_size,
                 limit=args.limit,
                 max_gen_toks=max_new_tokens,
+                samples_per_problem=task.samples_per_problem,
+                sampling_temperature=task.sampling_temperature,
+                sampling_top_p=task.sampling_top_p,
             )
             result = result_from_harness_logs(
                 raw_result,
@@ -101,6 +105,9 @@ def main() -> None:
                 batch_size=batch_size,
                 limit=args.limit,
                 max_gen_toks=max_new_tokens,
+                samples_per_problem=task.samples_per_problem,
+                sampling_temperature=task.sampling_temperature,
+                sampling_top_p=task.sampling_top_p,
             )
             result = result_from_vllm_raw_logs(
                 raw_result,
@@ -111,7 +118,7 @@ def main() -> None:
         preview = preview_logged_samples(result)
         if preview:
             print(preview)
-        print(json.dumps(result["metrics"], ensure_ascii=False, indent=2))
+        print(json.dumps(summarize_metrics_for_console(result["metrics"]), ensure_ascii=False, indent=2))
         final_output_path, raw_output_path = resolve_task_output_paths(task, output_dir=cfg.output_dir, runner=runner)
         write_raw_eval_result(raw_output_path, raw_result)
         write_eval_result(final_output_path, result)
