@@ -70,7 +70,7 @@ class SimPODataTest(unittest.TestCase):
         self.assertNotIn("1", {row["id"] for row in query_rows})
 
     def test_build_preference_pairs_prefers_correct_vs_incorrect(self) -> None:
-        cfg = load_simpo_data_config("configs/simpo_data.yaml")
+        cfg = load_simpo_data_config("configs/simpo/data.yaml")
         raw_samples = [
             {
                 "id": "q1",
@@ -91,7 +91,7 @@ class SimPODataTest(unittest.TestCase):
         self.assertEqual(pairs[0]["rejected"], "wrong")
 
     def test_build_preference_pairs_falls_back_to_correct_vs_correct_with_gap(self) -> None:
-        cfg = load_simpo_data_config("configs/simpo_data.yaml")
+        cfg = load_simpo_data_config("configs/simpo/data.yaml")
         raw_samples = [
             {
                 "id": "q2",
@@ -111,7 +111,7 @@ class SimPODataTest(unittest.TestCase):
         self.assertEqual(pairs[0]["rejected"], "verbose answer")
 
     def test_build_pilot_pairs_prefers_correct_vs_incorrect(self) -> None:
-        cfg = load_simpo_data_config("configs/simpo_data.yaml")
+        cfg = load_simpo_data_config("configs/simpo/data.yaml")
         cfg = cfg.model_copy(update={"pilot_pair_count": 2, "seed": 7})
         pair_rows = [
             {
@@ -147,7 +147,7 @@ class SimPODataTest(unittest.TestCase):
         )
 
     def test_build_pilot_pairs_backfills_with_correct_vs_correct(self) -> None:
-        cfg = load_simpo_data_config("configs/simpo_data.yaml")
+        cfg = load_simpo_data_config("configs/simpo/data.yaml")
         cfg = cfg.model_copy(update={"pilot_pair_count": 3, "seed": 7})
         pair_rows = [
             {

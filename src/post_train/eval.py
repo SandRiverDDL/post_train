@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import time
 from inspect import getsource
 from pathlib import Path
@@ -186,6 +187,25 @@ def normalize_batch_settings(
 
 def build_task_name(dataset_path: str | Path) -> str:
     return Path(dataset_path).stem.replace("-", "_")
+
+
+def _sanitize_output_component(value: str) -> str:
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
+    return sanitized.strip("._") or "unknown"
+
+
+def build_model_output_path(model_name: str) -> Path:
+    model_path = Path(model_name)
+    parts = list(model_path.parts)
+    if "outputs" in parts:
+        start = parts.index("outputs") + 1
+        relative_parts = [_sanitize_output_component(part) for part in parts[start:] if part not in ("", ".")]
+        if relative_parts:
+            return Path(*relative_parts)
+    external_parts = [_sanitize_output_component(part) for part in model_name.split("/") if part.strip()]
+    if not external_parts:
+        external_parts = ["unknown_model"]
+    return Path("external", *external_parts)
 
 
 def process_results_stub(_doc: dict[str, Any], _results: list[str]) -> dict[str, float]:
@@ -503,10 +523,18 @@ def resolve_eval_tasks(
     return tasks
 
 
-def resolve_task_output_paths(task: EvalTaskConfig, *, output_dir: Path, runner: str) -> tuple[Path, Path]:
-    default_output = output_dir / f"{task.name}.{runner}.json"
-    final_output = task.output_path or default_output
-    if task.output_path is not None and final_output.suffix == ".json":
-        final_output = final_output.with_name(f"{final_output.stem}.{runner}.json")
-    raw_output = task.raw_output_path or final_output.with_suffix(".raw.json")
-    return final_output, raw_output
+def resolve_task_output_paths(
+    task: EvalTaskConfig,
+    *,
+    output_dir: Path,
+    model_name: str,
+) -> tuple[Path, Path]:
+    if task.output_path is not None:
+        output_root = Path(task.output_path)
+        if output_root.suffix:
+            raise ValueError("--output 必须是目录路径，不能是文件路径。")
+    else:
+        output_root = output_dir / build_model_output_path(model_name) / task.name
+    result_output = output_root / "result.json"
+    raw_output = task.raw_output_path or (output_root / "raw.json")
+    return result_output, raw_output

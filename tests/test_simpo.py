@@ -40,7 +40,7 @@ class SimPOTrainTest(unittest.TestCase):
         self.assertEqual(cfg.resume_from_checkpoint, "/tmp/output/checkpoint-12")
 
     def test_build_training_args_uses_resume_related_fields(self) -> None:
-        cfg = load_simpo_config("configs/simpo.yaml")
+        cfg = load_simpo_config("configs/simpo/train.yaml")
         training_args = build_training_args(cfg)
 
         self.assertEqual(training_args.logging_steps, 5)
@@ -50,7 +50,7 @@ class SimPOTrainTest(unittest.TestCase):
         self.assertEqual(training_args.max_length, 768)
 
     def test_build_quantization_kwargs_uses_4bit_defaults(self) -> None:
-        cfg = load_simpo_config("configs/simpo.yaml")
+        cfg = load_simpo_config("configs/simpo/train.yaml")
 
         with patch("torch.cuda.is_available", return_value=True), patch(
             "torch.cuda.is_bf16_supported", return_value=True

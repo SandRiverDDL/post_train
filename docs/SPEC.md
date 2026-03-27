@@ -27,12 +27,20 @@
 
 - 定义为“从当前模型出发生成新样本，再经过筛选后继续做 SFT”。
 - 当前首版口径：
-  - query 来源：`UWNSL/MATH_training_split_short_cot` 同源题池
-  - 默认排除 `stage1_train`、`stage1_dev200` 与各类 eval/dev 集
+  - seed 模型固定为 `outputs/stage1_sft_5000/checkpoint-200`
+  - query registry 固定为 `data/stage1_train_5000.jsonl`
+  - 当前语义是“seed 模型已见 5000 题上的 self-refine / instability mining”，不是未见题 pure on-policy
+  - 当前不使用 `OpenR1-Math-220k-Cleaned` 或其他 `math220k` 数据做 on-policy query 或 retained 训练数据
+  - 默认排除 `stage1_dev200_5000` 与各类 eval/dev 集
   - 生成 prompt 复用当前 `SFT prompt`
-  - 每轮默认抽 `256` 题、每题采样 `4` 条
+  - 单轮数据准备默认对整个 query registry 做 full-harvest
+  - 自动循环时每轮默认抽 `256` 题、每题采样 `4` 条
   - 样本筛选统一使用本地 parser + `math-verify`
-  - 保留规则固定为：`parse_success=True`、`is_correct=True`、`completion_len<=512`
+  - 每轮必须保留全量轨迹归档
+  - 默认同时导出两套 retained：
+    - `any_correct_shortest`
+    - `mixed_only_shortest`
+  - 两套 retained 都要求：`parse_success=True`、`is_correct=True`、`completion_len<=512`
   - 每题最多保留 `1` 条，若多条满足则保留最短正确回答
   - 继续复用现有 `train_sft.py` / `eval_model.py`
   - 支持自动循环脚本：每轮直接使用该轮最终模型进入下一轮，轮间用 `global_dev_math500_150` 上的 `normalized_accuracy` 做早停
@@ -47,6 +55,7 @@
 ### 暂停路线
 
 - 两阶段 `SFT + SIMPO` 当前不是主线。
+- `OpenR1-Math-220k-Cleaned` 当前只出现在暂停中的 stage2 / mixed 路线，不属于 on-policy 主线数据源。
 - 相关设计、观察和保留原因迁到：
   - `docs/experiments/two-stage-sft-simpo.md`
 
@@ -60,8 +69,8 @@
   - `lm_eval`：`lm-eval-harness` 负责编排推理，本地 parser + `math-verify` 判定
 - 当前默认评测链路：`vllm_raw`
 - `AIME24/AIME25` 当前口径：
-  - 不进入默认 `configs/eval.yaml`
-  - 通过单独 `configs/eval_aime.yaml` opt-in
+  - 不进入默认 `configs/eval/default.yaml`
+  - 通过单独 `configs/eval/aime.yaml` opt-in
   - 每题默认采样 `4` 次
   - 主指标为严格 `pass@1 = mean(correct_count / 4)`
   - sampled pass@1 当前只支持 `vllm_raw`
@@ -73,6 +82,8 @@
 - `normalized_accuracy`
 - `pass_at_1`
 - `avg_output_tokens`
+- `all_correct / mixed / all_wrong`
+- `correct_k_of_4`
 
 ## Prompt 原则
 
@@ -85,8 +96,8 @@
 本阶段当前不做：
 
 - 同时把 `on-policy SFT` 与两阶段 `SFT + SIMPO` 都当作现行主线
-- 复杂题目选择策略
-- 复杂轨迹筛选策略
+- 更复杂题目选择策略
+- 超出 `any_correct_shortest` / `mixed_only_shortest` 的复杂轨迹筛选策略
 - `mixed_onpolicy`
 - 为未来阶段预先设计复杂抽象
 

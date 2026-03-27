@@ -33,27 +33,28 @@ class OnPolicyLoopTest(unittest.TestCase):
             config_path.write_text("", encoding="utf-8")
             cfg = load_on_policy_loop_config(config_path)
 
-        self.assertEqual(cfg.seed_model, "outputs/stage1_sft/checkpoint-50")
+        self.assertEqual(cfg.seed_model, "outputs/stage1_sft_5000/checkpoint-200")
         self.assertEqual(cfg.max_rounds, 10)
+        self.assertEqual(cfg.round_query_count, 256)
         self.assertEqual(cfg.patience, 3)
         self.assertEqual(cfg.min_delta, 0.0)
 
     def test_build_round_paths_uses_round_index(self) -> None:
-        cfg = load_on_policy_loop_config("configs/on_policy_loop.yaml")
+        cfg = load_on_policy_loop_config("configs/on_policy/loop.yaml")
         paths = build_round_paths(cfg, 2)
 
         self.assertEqual(paths["data_dir"], Path("data/on_policy_loop/round2"))
         self.assertEqual(paths["output_dir"], Path("outputs/on_policy_loop/round2"))
 
     def test_build_round_configs_override_round_specific_fields(self) -> None:
-        loop_cfg = load_on_policy_loop_config("configs/on_policy_loop.yaml")
+        loop_cfg = load_on_policy_loop_config("configs/on_policy/loop.yaml")
         data_cfg = build_round_data_config(
-            load_on_policy_data_config("configs/on_policy_data.yaml"),
+            load_on_policy_data_config("configs/on_policy/data.yaml"),
             loop_cfg,
             round_index=3,
             generation_model="model-x",
         )
-        base_train_cfg = load_sft_config("configs/on_policy_sft.yaml")
+        base_train_cfg = load_sft_config("configs/on_policy/sft.yaml")
         train_cfg = build_round_train_config(
             base_train_cfg,
             loop_cfg,
@@ -114,12 +115,13 @@ class OnPolicyLoopTest(unittest.TestCase):
     def test_run_on_policy_loop_stops_after_patience(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
-            loop_cfg = load_on_policy_loop_config("configs/on_policy_loop.yaml").model_copy(
+            loop_cfg = load_on_policy_loop_config("configs/on_policy/loop.yaml").model_copy(
                 update={
                     "round_base_dir": tmp_path / "outputs",
                     "data_base_dir": tmp_path / "data",
                     "max_rounds": 5,
                     "patience": 3,
+                    "round_query_count": 5,
                     "seed_model": "seed-model",
                 }
             )
@@ -129,7 +131,7 @@ class OnPolicyLoopTest(unittest.TestCase):
                 "report": {"retained": {"kept": 100, "retained_ratio": 0.5}},
             }
             holdout_scores = [0.70, 0.70, 0.69, 0.69]
-            data_cfg = load_on_policy_data_config("configs/on_policy_data.yaml")
+            data_cfg = load_on_policy_data_config("configs/on_policy/data.yaml")
             loop_queries = [
                 {"id": f"q{i}", "question": f"Question {i}", "final_answer": str(i), "meta": {"source": "toy"}}
                 for i in range(12)
@@ -137,16 +139,31 @@ class OnPolicyLoopTest(unittest.TestCase):
 
             def fake_holdout(**kwargs):
                 score = holdout_scores.pop(0)
+                task_root = Path(kwargs["output_dir"]) / "global_dev_math500_150"
                 return {
                     "result": {"metrics": {"normalized_accuracy": score}},
-                    "result_path": str(Path(kwargs["output_dir"]) / "holdout.vllm_raw.json"),
-                    "raw_result_path": str(Path(kwargs["output_dir"]) / "holdout.vllm_raw.raw.json"),
+                    "result_path": str(task_root / "result.json"),
+                    "raw_result_path": str(task_root / "raw.json"),
+                }
+
+            def fake_sample_round_queries(query_rows, sampler_state, *, requested_count):
+                self.assertEqual(requested_count, 5)
+                return loop_queries[:requested_count], {
+                    "query_pool_size": len(loop_queries),
+                    "requested_query_count": requested_count,
+                    "effective_query_count": requested_count,
+                    "crossed_epoch": False,
+                    "epoch_index_start": 0,
+                    "epoch_offset_start": 0,
+                    "epoch_index_end": 0,
+                    "epoch_offset_end": requested_count,
                 }
 
             with patch("post_train.on_policy_loop.load_on_policy_data_config", return_value=data_cfg), \
-                patch("post_train.on_policy_loop.load_sft_config", return_value=load_sft_config("configs/on_policy_sft.yaml")), \
+                patch("post_train.on_policy_loop.load_sft_config", return_value=load_sft_config("configs/on_policy/sft.yaml")), \
                 patch("post_train.on_policy_loop.load_eval_config"), \
                 patch("post_train.on_policy_loop.load_query_candidates", return_value=(loop_queries, {"available_rows": 12})), \
+                patch("post_train.on_policy_loop.sample_round_queries", side_effect=fake_sample_round_queries), \
                 patch("post_train.on_policy_loop.prepare_on_policy_sft_dataset_from_queries", return_value=data_result), \
                 patch("post_train.on_policy_loop.train_sft") as mock_train, \
                 patch("post_train.on_policy_loop.evaluate_single_dataset", side_effect=fake_holdout):
@@ -161,13 +178,13 @@ class OnPolicyLoopTest(unittest.TestCase):
     def test_run_on_policy_loop_stops_on_insufficient_retained_data(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
-            loop_cfg = load_on_policy_loop_config("configs/on_policy_loop.yaml").model_copy(
+            loop_cfg = load_on_policy_loop_config("configs/on_policy/loop.yaml").model_copy(
                 update={
                     "round_base_dir": tmp_path / "outputs",
                     "data_base_dir": tmp_path / "data",
                 }
             )
-            data_cfg = load_on_policy_data_config("configs/on_policy_data.yaml")
+            data_cfg = load_on_policy_data_config("configs/on_policy/data.yaml")
             loop_queries = [{"id": f"q{i}", "question": f"Question {i}", "final_answer": str(i)} for i in range(6)]
 
             with patch("post_train.on_policy_loop.load_on_policy_data_config", return_value=data_cfg), \

@@ -97,9 +97,9 @@ def evaluate_checkpoint(
             model_name=str(checkpoint_dir),
         )
 
-    checkpoint_output_dir = Path(output_dir)
-    final_output_path = checkpoint_output_dir / f"{checkpoint_dir.name}.{runner}.json"
-    raw_output_path = checkpoint_output_dir / f"{checkpoint_dir.name}.{runner}.raw.json"
+    checkpoint_output_dir = Path(output_dir) / checkpoint_dir.name
+    final_output_path = checkpoint_output_dir / "result.json"
+    raw_output_path = checkpoint_output_dir / "raw.json"
     write_raw_eval_result(raw_output_path, raw_result)
     write_eval_result(final_output_path, result)
     return {
@@ -135,7 +135,7 @@ def write_best_checkpoint_summary(
     records: list[dict[str, Any]],
 ) -> tuple[Path, Path]:
     base = Path(output_dir)
-    summary_path = ensure_parent(base / f"dev_ranking.{runner}.json")
+    summary_path = ensure_parent(base / "dev_ranking.json")
     best_path = ensure_parent(base / "best_checkpoint.json")
     best_record = select_best_checkpoint(records)
     summary = {

@@ -139,10 +139,15 @@
   - prepare -> train -> holdout eval
   - 每轮直接用该轮最终模型继续
   - 轮间用 `global_dev_math500_150` 做 early stop
-- query 默认来自 `stage1` 同源题池，排除 `stage1_train`、`stage1_dev200` 与 eval/dev
+- 当前默认 seed 模型为 `outputs/stage1_sft_5000/checkpoint-200`
+- query registry 默认来自 `data/stage1_train_5000.jsonl`
+- 当前默认语义是已见 5000 题上的 self-refine，不是未见题 pure on-policy
+- query 默认排除 `stage1_dev200_5000` 与 eval/dev
+- 当前 on-policy 主线不混入 `OpenR1-Math-220k-Cleaned` / `math220k` 数据
 - 自动循环按 epoch 洗牌消费 query 池，避免前几轮反复命中同一小闭集
 - 生成使用 `SFT prompt`
-- 每题默认采样 `4` 条，仅保留 `1` 条最短且答案正确、长度不过阈值的回答
+- 每题默认采样 `4` 条，并始终保留全量轨迹归档
+- 每轮默认同时导出 `any_correct_shortest` 与 `mixed_only_shortest` 两套 retained
 - 每轮训练结束后，直接复用该轮输出模型进入下一轮
 
 ### 3. 两阶段 SFT（暂停候选路线）
@@ -165,6 +170,7 @@
   - token 长度分桶
   - 多 pool 按配额混采
 - 当前主数据源固定为 `OpenR1-Math-220k-Cleaned` 与 `stage1_train`
+- 这部分属于暂停中的 stage2 路线，不是当前 on-policy 主线
 
 Stage2 target dev：
 
@@ -220,6 +226,8 @@ query pool
 - `normalized_accuracy`
 - `pass_at_1`
 - `avg_output_tokens`
+- `all_correct / mixed / all_wrong`
+- `correct_k_of_4`
 
 ## 扩展原则
 

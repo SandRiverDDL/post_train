@@ -235,14 +235,14 @@ class EvalPipelineTest(unittest.TestCase):
         self.assertEqual([task.name for task in tasks], ["math500"])
 
     def test_load_eval_aime_config_supports_both_tasks(self) -> None:
-        cfg = load_eval_config("configs/eval_aime.yaml")
+        cfg = load_eval_config("configs/eval/aime.yaml")
 
         self.assertEqual([task.name for task in cfg.tasks], ["aime24", "aime25"])
         self.assertEqual(cfg.tasks[0].samples_per_problem, 4)
         self.assertEqual(cfg.tasks[1].sampling_temperature, 0.6)
 
     def test_resolve_eval_tasks_filters_aime_tasks_from_combined_config(self) -> None:
-        cfg = load_eval_config("configs/eval_aime.yaml")
+        cfg = load_eval_config("configs/eval/aime.yaml")
 
         tasks = resolve_eval_tasks(cfg, requested_tasks=["aime24"])
 
@@ -331,11 +331,45 @@ class EvalPipelineTest(unittest.TestCase):
         self.assertEqual(result["metrics"]["generations_per_second"], 1.0)
         self.assertEqual(len(result["predictions"]), 2)
 
-    def test_resolve_task_output_paths_adds_runner_suffix(self) -> None:
+    def test_resolve_task_output_paths_uses_model_scoped_directory(self) -> None:
         task = type("Task", (), {"name": "gsm8k", "output_path": None, "raw_output_path": None})()
-        final_output, raw_output = resolve_task_output_paths(task, output_dir=Path("outputs/eval"), runner="vllm_raw")
-        self.assertEqual(final_output, Path("outputs/eval/gsm8k.vllm_raw.json"))
-        self.assertEqual(raw_output, Path("outputs/eval/gsm8k.vllm_raw.raw.json"))
+        final_output, raw_output = resolve_task_output_paths(
+            task,
+            output_dir=Path("outputs/eval"),
+            model_name="outputs/stage1_sft/checkpoint-50",
+        )
+        self.assertEqual(final_output, Path("outputs/eval/stage1_sft/checkpoint-50/gsm8k/result.json"))
+        self.assertEqual(raw_output, Path("outputs/eval/stage1_sft/checkpoint-50/gsm8k/raw.json"))
+
+    def test_resolve_task_output_paths_rejects_file_override(self) -> None:
+        task = type(
+            "Task",
+            (),
+            {"name": "gsm8k", "output_path": Path("outputs/eval/custom.json"), "raw_output_path": None},
+        )()
+
+        with self.assertRaisesRegex(ValueError, "--output 必须是目录路径"):
+            resolve_task_output_paths(
+                task,
+                output_dir=Path("outputs/eval"),
+                model_name="outputs/stage1_sft/checkpoint-50",
+            )
+
+    def test_resolve_task_output_paths_external_model_uses_external_prefix(self) -> None:
+        task = type("Task", (), {"name": "math500", "output_path": None, "raw_output_path": None})()
+        final_output, raw_output = resolve_task_output_paths(
+            task,
+            output_dir=Path("outputs/eval"),
+            model_name="Qwen/Qwen2.5-Math-1.5B",
+        )
+        self.assertEqual(
+            final_output,
+            Path("outputs/eval/external/Qwen/Qwen2.5-Math-1.5B/math500/result.json"),
+        )
+        self.assertEqual(
+            raw_output,
+            Path("outputs/eval/external/Qwen/Qwen2.5-Math-1.5B/math500/raw.json"),
+        )
 
     def test_run_vllm_raw_eval_calls_generate_once(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

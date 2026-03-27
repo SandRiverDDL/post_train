@@ -26,7 +26,9 @@ def main() -> None:
     print(json.dumps(result["report"], ensure_ascii=False, indent=2))
     print(f"wrote_on_policy_queries={result['query_output_path']}")
     print(f"wrote_on_policy_raw_samples={result['raw_samples_output_path']}")
-    print(f"wrote_on_policy_train={result['retained_output_path']}")
+    print(f"wrote_on_policy_train_primary={result['retained_output_path']}")
+    for selector_name, output_path in sorted(result["retained_output_paths"].items()):
+        print(f"wrote_on_policy_train_{selector_name}={output_path}")
     print(f"wrote_on_policy_report={result['report_path']}")
 
 

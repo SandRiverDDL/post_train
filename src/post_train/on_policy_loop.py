@@ -55,8 +55,8 @@ def build_round_paths(cfg: OnPolicyLoopConfig, round_index: int) -> dict[str, Pa
         "raw_samples_output_path": data_dir / "raw_samples.jsonl",
         "retained_output_path": data_dir / "train.jsonl",
         "report_path": data_dir / "train.report.json",
-        "holdout_output_path": output_dir / "holdout_eval" / "holdout.vllm_raw.json",
-        "holdout_raw_output_path": output_dir / "holdout_eval" / "holdout.vllm_raw.raw.json",
+        "holdout_output_path": output_dir / "holdout_eval" / "result.json",
+        "holdout_raw_output_path": output_dir / "holdout_eval" / "raw.json",
         "round_summary_path": output_dir / "round_summary.json",
     }
 
@@ -174,9 +174,9 @@ def evaluate_single_dataset(
             dataset_path=dataset_path,
             model_name=model_name,
         )
-    output_root = Path(output_dir)
-    final_output_path = output_root / f"{task_name}.{resolved_runner}.json"
-    raw_output_path = output_root / f"{task_name}.{resolved_runner}.raw.json"
+    output_root = Path(output_dir) / task_name
+    final_output_path = output_root / "result.json"
+    raw_output_path = output_root / "raw.json"
     write_raw_eval_result(raw_output_path, raw_result)
     write_eval_result(final_output_path, result)
     return {
@@ -324,11 +324,12 @@ def run_on_policy_loop(cfg: OnPolicyLoopConfig) -> dict[str, Any]:
             round_queries, sampler_report = sample_round_queries(
                 query_rows,
                 query_sampler_state,
-                requested_count=base_data_cfg.query_count,
+                requested_count=cfg.round_query_count,
             )
             round_query_report = dict(query_pool_report)
             round_query_report["sampled_queries"] = len(round_queries)
             round_query_report["effective_query_count"] = sampler_report["effective_query_count"]
+            round_query_report["round_query_count"] = cfg.round_query_count
             data_result = prepare_on_policy_sft_dataset_from_queries(
                 data_cfg,
                 query_rows=round_queries,
@@ -387,6 +388,8 @@ def run_on_policy_loop(cfg: OnPolicyLoopConfig) -> dict[str, Any]:
             "round_index": round_index,
             "round_name": round_name,
             "generation_model": current_model,
+            "primary_selector": str(data_result["report"].get("primary_selector", "")),
+            "round_query_count": cfg.round_query_count,
             "retained_count": int(retained_report["kept"]),
             "retained_ratio": float(retained_report["retained_ratio"]),
             "query_sampling": sampler_report,
@@ -399,6 +402,7 @@ def run_on_policy_loop(cfg: OnPolicyLoopConfig) -> dict[str, Any]:
             "holdout_result_path": str(holdout_eval["result_path"]),
             "holdout_raw_result_path": str(holdout_eval["raw_result_path"]),
             "data_report_path": str(data_result["report_path"]),
+            "retained_output_paths": data_result.get("retained_output_paths", {}),
         }
         _write_json(round_paths["round_summary_path"], round_summary)
         round_summaries.append(round_summary)

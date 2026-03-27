@@ -148,22 +148,22 @@ class OnPolicyDataConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     round_name: str = "round1"
+    query_file_path: Path | None = None
     query_dataset: str = "UWNSL/MATH_training_split_short_cot"
     query_split: str = "train"
     query_config_name: str | None = None
     query_source: str = "UWNSL/MATH_training_split_short_cot"
     exclude_paths: list[Path] = Field(
         default_factory=lambda: [
-            Path("data/stage1_train.jsonl"),
-            Path("data/stage1_dev200.jsonl"),
+            Path("data/stage1_dev200_5000.jsonl"),
             Path("data/eval/global_dev_math500_150.jsonl"),
             Path("data/eval/gsm8k_test.jsonl"),
             Path("data/eval/math500_test.jsonl"),
         ]
     )
-    query_count: int = Field(default=256, ge=1)
+    query_limit: int | None = Field(default=None, ge=1)
     responses_per_query: int = Field(default=4, ge=2)
-    generation_model: str = "outputs/stage1_sft/checkpoint-50"
+    generation_model: str = "outputs/stage1_sft_5000/checkpoint-200"
     base_model_name: str
     max_model_length: int = Field(default=2048, ge=1)
     temperature: float = Field(default=0.7, ge=0.0)
@@ -171,6 +171,7 @@ class OnPolicyDataConfig(BaseModel):
     max_new_tokens: int = Field(default=768, ge=1)
     max_completion_tokens: int = Field(default=512, ge=1)
     min_retained_count: int = Field(default=32, ge=1)
+    primary_selector: Literal["any_correct_shortest", "mixed_only_shortest"] = "any_correct_shortest"
     gpu_memory_utilization: float = Field(default=0.7, gt=0.0, le=1.0)
     max_lora_rank: int | None = Field(default=None, ge=1)
     seed: int = 42
@@ -180,16 +181,28 @@ class OnPolicyDataConfig(BaseModel):
     report_path: Path = Path("data/on_policy/train.report.json")
     cache_dir: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_query_count(cls, raw_value):
+        if not isinstance(raw_value, dict):
+            return raw_value
+        value = dict(raw_value)
+        legacy_query_count = value.pop("query_count", None)
+        if "query_limit" not in value and legacy_query_count is not None:
+            value["query_limit"] = legacy_query_count
+        return value
+
 
 class OnPolicyLoopConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    seed_model: str = "outputs/stage1_sft/checkpoint-50"
-    base_on_policy_data_config: Path = Path("configs/on_policy_data.yaml")
-    base_sft_config: Path = Path("configs/on_policy_sft.yaml")
-    eval_config: Path = Path("configs/eval.yaml")
+    seed_model: str = "outputs/stage1_sft_5000/checkpoint-200"
+    base_on_policy_data_config: Path = Path("configs/on_policy/data.yaml")
+    base_sft_config: Path = Path("configs/on_policy/sft.yaml")
+    eval_config: Path = Path("configs/eval/default.yaml")
     stop_dataset: Path = Path("data/eval/global_dev_math500_150.jsonl")
     max_rounds: int = Field(default=10, ge=1)
+    round_query_count: int = Field(default=256, ge=1)
     patience: int = Field(default=3, ge=1)
     min_delta: float = Field(default=0.0, ge=0.0)
     round_base_dir: Path = Path("outputs/on_policy_loop")

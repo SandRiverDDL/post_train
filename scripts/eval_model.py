@@ -119,7 +119,11 @@ def main() -> None:
         if preview:
             print(preview)
         print(json.dumps(summarize_metrics_for_console(result["metrics"]), ensure_ascii=False, indent=2))
-        final_output_path, raw_output_path = resolve_task_output_paths(task, output_dir=cfg.output_dir, runner=runner)
+        final_output_path, raw_output_path = resolve_task_output_paths(
+            task,
+            output_dir=cfg.output_dir,
+            model_name=model_name,
+        )
         write_raw_eval_result(raw_output_path, raw_result)
         write_eval_result(final_output_path, result)
         print(f"wrote_raw_result={raw_output_path}")
