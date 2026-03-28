@@ -15,6 +15,19 @@
 - `data/stage1_train.jsonl`
 - `data/stage1_dev200.jsonl`
 
+Mix-Long stage1 实验线：
+
+```bash
+.venv/bin/python scripts/prepare_stage2_mix_long_data.py --config configs/stage1/mix_long_data.yaml
+```
+
+默认规则：
+
+- 数据源固定为 `UWNSL/Mix-Long_long_0.2_short_0.8`
+- 直接使用过滤后的全量样本
+- 当前默认删除 `solution_tokens > 4096` 的样本
+- 如需临时缩小规模，可追加 `--sample-size N`
+
 如需准备 benchmark 与其他评测数据：
 
 ```bash
@@ -49,6 +62,21 @@
 - 每 `25` step 保存 checkpoint
 - 按长度分桶组 batch
 - 每 `5` step 打印一次训练日志
+- 当前 `configs/stage1/sft.yaml` 默认开启 `PROFIT`
+- `PROFIT` 会屏蔽 gold probability 小于 `profit_threshold` 的 completion token，不参与 loss
+
+Mix-Long stage1 实验线训练：
+
+```bash
+.venv/bin/python scripts/train_sft.py --config configs/stage1/mix_long_sft.yaml
+```
+
+这条线的默认差异：
+
+- `max_seq_length = 5120`
+- `batch_size = 4`
+- `gradient_accumulation_steps = 8`
+- 其余仍保持 stage1 的 `2 epoch` 与 checkpoint 选择口径
 
 ## 选择 stage1 最优 checkpoint
 

@@ -25,6 +25,8 @@ class SFTTrainConfig(BaseModel):
     weight_decay: float = 0.01
     logging_steps: int = Field(default=5, ge=1)
     group_by_length: bool = True
+    profit_enabled: bool = False
+    profit_threshold: float = Field(default=0.1, gt=0.0, lt=1.0)
     save_strategy: Literal["epoch", "steps", "no"] = "epoch"
     save_steps: int | None = Field(default=None, ge=1)
     save_total_limit: int | None = Field(default=None, ge=1)

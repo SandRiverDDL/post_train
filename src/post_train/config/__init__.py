@@ -7,7 +7,7 @@ from .io import load_yaml_config
 from .on_policy import OnPolicyDataConfig, OnPolicyLoopConfig
 from .sft import SFTTrainConfig
 from .simpo import SimPOConfig, SimPODataConfig
-from .stage2 import Stage2DataConfig
+from .stage2 import Stage2DataConfig, Stage2HendrycksLongDataConfig, Stage2MixLongDataConfig
 
 
 def load_sft_config(path: str | Path) -> SFTTrainConfig:
@@ -38,6 +38,14 @@ def load_stage2_data_config(path: str | Path) -> Stage2DataConfig:
     return Stage2DataConfig.model_validate(load_yaml_config(path))
 
 
+def load_stage2_mix_long_data_config(path: str | Path) -> Stage2MixLongDataConfig:
+    return Stage2MixLongDataConfig.model_validate(load_yaml_config(path))
+
+
+def load_stage2_hendrycks_long_data_config(path: str | Path) -> Stage2HendrycksLongDataConfig:
+    return Stage2HendrycksLongDataConfig.model_validate(load_yaml_config(path))
+
+
 __all__ = [
     "EvalConfig",
     "EvalTaskConfig",
@@ -47,6 +55,8 @@ __all__ = [
     "SimPOConfig",
     "SimPODataConfig",
     "Stage2DataConfig",
+    "Stage2HendrycksLongDataConfig",
+    "Stage2MixLongDataConfig",
     "load_eval_config",
     "load_on_policy_data_config",
     "load_on_policy_loop_config",
@@ -54,5 +64,7 @@ __all__ = [
     "load_simpo_config",
     "load_simpo_data_config",
     "load_stage2_data_config",
+    "load_stage2_hendrycks_long_data_config",
+    "load_stage2_mix_long_data_config",
     "load_yaml_config",
 ]

@@ -5,10 +5,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import torch
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from post_train.sft import _tokenize_prompt_completion, build_train_dataset
+from post_train.sft import _compute_sft_loss, _tokenize_prompt_completion, build_train_dataset
 
 
 class BoundaryMergingTokenizer:
@@ -57,6 +59,92 @@ class SFTTokenizationTest(unittest.TestCase):
         row = dataset[0]
         self.assertIn("length", row)
         self.assertEqual(row["length"], len(row["input_ids"]))
+
+
+class SFTProfitLossTest(unittest.TestCase):
+    def test_compute_sft_loss_matches_standard_ce_when_profit_disabled(self) -> None:
+        logits = torch.tensor(
+            [
+                [
+                    [0.0, 0.0, 0.0],
+                    [0.0, 3.0, 0.0],
+                    [0.0, 0.0, 2.0],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        labels = torch.tensor([[-100, 1, 2]], dtype=torch.long)
+
+        loss, metrics = _compute_sft_loss(
+            logits,
+            labels,
+            profit_enabled=False,
+            profit_threshold=0.1,
+        )
+
+        shift_logits = logits[..., :-1, :].contiguous().view(-1, logits.size(-1))
+        shift_labels = labels[..., 1:].contiguous().view(-1)
+        expected = torch.nn.functional.cross_entropy(shift_logits, shift_labels, reduction="mean")
+        self.assertAlmostEqual(loss.item(), expected.item(), places=6)
+        self.assertEqual(metrics["valid_tokens"], 2.0)
+        self.assertEqual(metrics["kept_tokens"], 2.0)
+        self.assertEqual(metrics["filtered_tokens"], 0.0)
+
+    def test_compute_sft_loss_filters_low_probability_tokens_when_profit_enabled(self) -> None:
+        logits = torch.tensor(
+            [
+                [
+                    [0.0, 3.0, 0.0],
+                    [3.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        labels = torch.tensor([[-100, 1, 2]], dtype=torch.long)
+
+        loss, metrics = _compute_sft_loss(
+            logits,
+            labels,
+            profit_enabled=True,
+            profit_threshold=0.1,
+        )
+
+        kept_expected = torch.nn.functional.cross_entropy(
+            logits[:, :1, :].contiguous().view(-1, logits.size(-1)),
+            torch.tensor([1]),
+            reduction="mean",
+        )
+        self.assertAlmostEqual(loss.item(), kept_expected.item(), places=6)
+        self.assertEqual(metrics["valid_tokens"], 2.0)
+        self.assertEqual(metrics["kept_tokens"], 1.0)
+        self.assertEqual(metrics["filtered_tokens"], 1.0)
+
+    def test_compute_sft_loss_returns_zero_when_all_supervised_tokens_are_filtered(self) -> None:
+        logits = torch.tensor(
+            [
+                [
+                    [0.0, 0.0, 0.0],
+                    [3.0, 0.0, 0.0],
+                    [3.0, 0.0, 0.0],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        labels = torch.tensor([[-100, 1, 2]], dtype=torch.long)
+
+        loss, metrics = _compute_sft_loss(
+            logits,
+            labels,
+            profit_enabled=True,
+            profit_threshold=0.99,
+        )
+
+        self.assertEqual(loss.item(), 0.0)
+        self.assertEqual(metrics["valid_tokens"], 2.0)
+        self.assertEqual(metrics["kept_tokens"], 0.0)
+        self.assertEqual(metrics["filtered_tokens"], 2.0)
+        self.assertEqual(metrics["empty_batches"], 1.0)
 
 
 if __name__ == "__main__":

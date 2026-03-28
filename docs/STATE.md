@@ -11,6 +11,7 @@
 - 配置目录：`configs/eval/`、`configs/on_policy/`、`configs/stage1/`、`configs/stage2/`、`configs/simpo/`
 - 当前开发模型：`Qwen/Qwen2.5-Math-1.5B`
 - 当前 `stage1` 数据口径：`UWNSL/MATH_training_split_short_cot`，首版规模 `2000`
+- 当前保留一条独立 `stage1_mix_long` 实验线：`UWNSL/Mix-Long_long_0.2_short_0.8`
 - 当前 on-policy 数据口径：固定使用 `data/stage1_train_5000.jsonl` 作为 query registry，并保留全量轨迹归档
 - 当前基础起点：`outputs/stage1_sft_5000/checkpoint-200`
 - 当前评测结果目录口径：`outputs/eval/<模型路径>/<task>/result.json` 与 `raw.json`
@@ -23,6 +24,7 @@
 3. `AIME24/AIME25` sampled pass@1 评测刚接入，仍缺少目标机器上的真实运行验证。
 4. 远程数据下载在当前环境里不稳定。
 5. 暂停路线仍保留在仓库里，文档与执行主线必须持续区分清楚。
+6. `stage1_mix_long` 作为独立实验线，仍需和当前 on-policy 主线分开解读，不自动视为新基线。
 
 ## 当前优先级
 

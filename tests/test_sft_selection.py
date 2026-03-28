@@ -23,6 +23,8 @@ class SFTSelectionTest(unittest.TestCase):
                         "train_dataset: data/stage1_train.jsonl",
                         "output_dir: outputs/stage1_sft",
                         "epochs: 2",
+                        "profit_enabled: true",
+                        "profit_threshold: 0.2",
                         "save_strategy: steps",
                         "save_steps: 25",
                         "save_total_limit: 12",
@@ -33,6 +35,8 @@ class SFTSelectionTest(unittest.TestCase):
             cfg = load_sft_config(config_path)
 
         self.assertEqual(cfg.epochs, 2)
+        self.assertTrue(cfg.profit_enabled)
+        self.assertEqual(cfg.profit_threshold, 0.2)
         self.assertEqual(cfg.save_strategy, "steps")
         self.assertEqual(cfg.save_steps, 25)
         self.assertEqual(cfg.save_total_limit, 12)

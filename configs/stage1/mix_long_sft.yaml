@@ -1,13 +1,13 @@
 model_name: /home/chy/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
-train_dataset: data/stage1_train.jsonl
-output_dir: outputs/stage1_sft
+train_dataset: data/stage1_mix_long_train.jsonl
+output_dir: outputs/stage1_mix_long_sft
 seed: 42
-max_seq_length: 1536
+max_seq_length: 5120
 learning_rate: 1.0e-4
 
 epochs: 2
-batch_size: 32
-gradient_accumulation_steps: 1
+batch_size: 4
+gradient_accumulation_steps: 8
 lora_rank: 16
 lora_alpha: 32
 lora_dropout: 0.0
@@ -16,9 +16,6 @@ weight_decay: 0.01
 logging_steps: 5
 group_by_length: true
 
-profit_enabled: true
-profit_threshold: 0.1
-
 save_strategy: steps
 save_steps: 25
-save_total_limit: 12
+save_total_limit: 20

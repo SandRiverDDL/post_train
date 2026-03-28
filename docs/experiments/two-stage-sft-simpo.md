@@ -36,6 +36,12 @@
 - 定义为“在另一份 SFT 数据上继续训练一次”。
 - 当前绑定到一条“清洗与筛选”数据管线，而不是模型采样管线。
 - 当前主数据源：`qingy2024/OpenR1-Math-220k-Cleaned`
+- 当前还保留一条 `hendrycks_math + long CoT` 对照线：
+  - 从 `EleutherAI/hendrycks_math` 中筛 `level 4/5`
+  - 与 `UWNSL/MATH_training_split_long_cot` 按标准化后的 `problem` 精确匹配
+  - 默认过滤 `solution_tokens > 4096`
+  - 与现有 short CoT 数据按 `long:short = 1:2` 混合成 `2000` 条
+  - 当前默认从 `outputs/stage1_mix_long_sft/checkpoint-300` 继续训练
 - 当前 MVP 配比：`50%` 随机 `stage1_train` + `35%` `math220k_short(<768)` + `15%` `math220k_long(<1380)`
 - 当前 `math220k` 绑定规则：
   - 优先使用 `clean_problem`
@@ -52,6 +58,7 @@
 - 当前实验现象：
   - `stage2` 会让模型更贴近 `math220k` 分布
   - 但未必带来中立 benchmark 的提升，当前要重点监控 `GSM8K` 这类 transfer 下降
+- `Mix-Long` 现已转成独立的 `stage1_mix_long` 实验线，不再作为这里的 `stage2` 入口
 
 ### SIMPO
 

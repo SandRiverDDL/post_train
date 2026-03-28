@@ -23,6 +23,21 @@
 - `math220k` 中 `question_type == "MCQ"` 直接过滤
 - `math220k` 的 `solution` 会被标准化为单个 `\boxed{...}` 尾部
 
+hendrycks_math + long CoT 对照线：
+
+```bash
+.venv/bin/python scripts/prepare_stage2_hendrycks_long_data.py \
+  --config configs/stage2/hendrycks_long_data.yaml
+```
+
+默认规则：
+
+- 只保留 `hendrycks_math` 中 `level in {4,5}` 的题
+- 与 `UWNSL/MATH_training_split_long_cot` 按标准化后的 `problem` 精确匹配
+- 当前默认过滤 `solution_tokens > 4096` 的 long CoT
+- 最终按 `long:short = 1:2` 组装到 `2000` 条
+- 会额外写 unmatched 预览，便于检查匹配率
+
 ## Stage2 SFT
 
 ```bash
@@ -34,6 +49,12 @@
 - `stage2` 输入数据由 `prepare_stage2_data.py` 生成
 - 训练入口仍复用 `train_sft.py`
 - 当前推荐 `learning_rate=2e-5`
+
+hendrycks_math + long CoT 对照线训练：
+
+```bash
+.venv/bin/python scripts/train_sft.py --config configs/stage2/hendrycks_long_sft.yaml
+```
 
 ## 准备 SIMPO 数据
 

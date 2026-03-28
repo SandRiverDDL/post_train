@@ -1,0 +1,9 @@
+dataset_name: UWNSL/Mix-Long_long_0.2_short_0.8
+dataset_split: train
+output_path: data/stage1_mix_long_train.jsonl
+report_path: data/stage1_mix_long_train.report.json
+tokenizer_name: /home/chy/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
+seed: 42
+max_solution_tokens: 4096
+sample_size:
+cache_dir:
