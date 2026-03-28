@@ -28,3 +28,4 @@ class SFTTrainConfig(BaseModel):
     save_strategy: Literal["epoch", "steps", "no"] = "epoch"
     save_steps: int | None = Field(default=None, ge=1)
     save_total_limit: int | None = Field(default=None, ge=1)
+    export_final_model: bool = True

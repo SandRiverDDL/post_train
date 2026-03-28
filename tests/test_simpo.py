@@ -45,7 +45,8 @@ class SimPOTrainTest(unittest.TestCase):
 
         self.assertEqual(training_args.logging_steps, 5)
         self.assertEqual(str(training_args.save_strategy), "SaveStrategy.STEPS")
-        self.assertEqual(training_args.save_steps, 25)
+        self.assertEqual(training_args.save_steps, cfg.save_steps)
+        self.assertEqual(training_args.save_total_limit, cfg.save_total_limit)
         self.assertEqual(training_args.max_prompt_length, 256)
         self.assertEqual(training_args.max_length, 768)
 

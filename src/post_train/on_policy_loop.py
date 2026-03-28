@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 from pathlib import Path
 from typing import Any
@@ -35,7 +36,12 @@ from post_train.on_policy_query_strategy import (
     sample_round_queries,
     update_mixed_query_strategy,
 )
+from post_train.on_policy_trainset import (
+    build_mixed_plus_anchor_dataset,
+    load_anchor_rows,
+)
 from post_train.sft import train_sft
+from post_train.sft_selection import run_checkpoint_selection
 
 FINISHED_STOP_REASONS = {
     "no_improvement",
@@ -71,6 +77,7 @@ def build_round_paths(cfg: OnPolicyLoopConfig, round_index: int) -> dict[str, Pa
         "query_output_path": data_dir / "query_pool.jsonl",
         "raw_samples_output_path": data_dir / "raw_samples.jsonl",
         "retained_output_path": data_dir / "train.jsonl",
+        "train_dataset_path": data_dir / "train.mixed_plus_anchor.jsonl",
         "report_path": data_dir / "train.report.json",
         "holdout_output_path": output_dir / "holdout_eval" / "result.json",
         "holdout_raw_output_path": output_dir / "holdout_eval" / "raw.json",
@@ -105,16 +112,27 @@ def build_round_train_config(
     round_index: int,
     model_name: str,
     train_dataset: str | Path,
+    train_sample_count: int,
 ) -> SFTTrainConfig:
     paths = build_round_paths(loop_cfg, round_index)
+    effective_batch = max(1, int(base_cfg.batch_size) * int(base_cfg.gradient_accumulation_steps))
+    estimated_total_steps = max(1, math.ceil((train_sample_count * float(loop_cfg.train_epochs)) / effective_batch))
+    save_steps = max(1, estimated_total_steps // int(loop_cfg.checkpoint_target_count))
     return base_cfg.model_copy(
         update={
             "model_name": model_name,
             "train_dataset": Path(train_dataset),
             "output_dir": paths["output_dir"],
-            "save_strategy": "no",
-            "save_steps": None,
-            "save_total_limit": None,
+            "learning_rate": loop_cfg.train_learning_rate,
+            "epochs": loop_cfg.train_epochs,
+            "save_strategy": "steps" if loop_cfg.checkpoint_selection_enabled else "no",
+            "save_steps": save_steps if loop_cfg.checkpoint_selection_enabled else None,
+            "save_total_limit": (
+                loop_cfg.checkpoint_save_total_limit
+                if loop_cfg.checkpoint_selection_enabled
+                else None
+            ),
+            "export_final_model": not loop_cfg.checkpoint_selection_enabled,
         }
     )
 
@@ -250,6 +268,7 @@ def _history_payload(
     no_improve_rounds: int,
     stop_reason: str | None,
     query_sampler_state: dict[str, Any] | None,
+    anchor_sampler_state: dict[str, Any] | None,
     query_strategy_state_path: str | None,
 ) -> dict[str, Any]:
     return {
@@ -267,6 +286,7 @@ def _history_payload(
         "last_completed_round": len(rounds),
         "stop_reason": stop_reason or "",
         "query_sampler_state": query_sampler_state,
+        "anchor_sampler_state": anchor_sampler_state,
         "query_strategy_state_path": query_strategy_state_path or "",
         "rounds": rounds,
     }
@@ -285,6 +305,18 @@ def run_on_policy_loop(
     final_summary_path = run_state["final_summary_path"]
 
     restored_history = run_state.get("history", {})
+    anchor_rows: list[dict[str, Any]] = []
+    anchor_sampler_state: dict[str, Any] | None = None
+    if cfg.train_selector == "mixed_plus_anchor":
+        if cfg.anchor_dataset_path is None:
+            raise ValueError("mixed_plus_anchor 需要 anchor_dataset_path。")
+        anchor_rows = load_anchor_rows(cfg.anchor_dataset_path)
+        if run_state["mode"] == "resume":
+            anchor_sampler_state = load_query_sampler_state(anchor_rows, restored_history.get("anchor_sampler_state"))
+            if anchor_sampler_state is None:
+                raise ValueError("history 缺少 anchor sampler state，无法安全 resume；请使用 --overwrite 重开。")
+        else:
+            anchor_sampler_state = build_query_sampler_state(anchor_rows, seed=base_data_cfg.seed + 2000)
     mixed_strategy_state: dict[str, Any] | None = None
     if cfg.query_strategy == STRATEGY_MIXED_BOOTSTRAP_CANDIDATE:
         if run_state["mode"] == "resume":
@@ -387,25 +419,74 @@ def run_on_policy_loop(
             round_summaries.append(round_summary)
             break
 
+        if cfg.train_selector == "mixed_plus_anchor":
+            if anchor_sampler_state is None:
+                raise ValueError("anchor sampler state 未初始化。")
+            train_dataset_path, trainset_report = build_mixed_plus_anchor_dataset(
+                mixed_retained_path=data_result["retained_output_paths"]["mixed_only_shortest"],
+                anchor_rows=anchor_rows,
+                anchor_sampler_state=anchor_sampler_state,
+                anchor_share=cfg.anchor_share,
+                output_path=round_paths["train_dataset_path"],
+            )
+        else:
+            train_dataset_path = Path(data_result["retained_output_path"])
+            retained_rows = int(data_result["report"]["retained"]["kept"])
+            trainset_report = {
+                "train_selector": "primary_retained",
+                "mixed_count": retained_rows,
+                "anchor_target": 0,
+                "anchor_count": 0,
+                "train_sample_count": retained_rows,
+                "anchor_share": 0.0,
+                "anchor_sampling": {},
+            }
+
         train_cfg = build_round_train_config(
             base_train_cfg,
             cfg,
             round_index=round_index,
             model_name=current_model,
-            train_dataset=data_result["retained_output_path"],
+            train_dataset=train_dataset_path,
+            train_sample_count=int(trainset_report["train_sample_count"]),
         )
         train_output_dir = train_sft(train_cfg)
-        holdout_eval = evaluate_single_dataset(
-            model_name=str(train_output_dir),
-            dataset_path=cfg.stop_dataset,
-            eval_cfg=eval_cfg,
-            output_dir=round_paths["output_dir"] / "holdout_eval",
-            backend=cfg.backend,
-            batch_size=cfg.batch_size,
-            max_new_tokens=cfg.max_new_tokens,
-            limit=cfg.limit,
-        )
-        holdout_metrics = holdout_eval["result"]["metrics"]
+        if cfg.checkpoint_selection_enabled:
+            selection_result = run_checkpoint_selection(
+                train_output_dir=train_output_dir,
+                dataset_path=cfg.stop_dataset,
+                eval_cfg=eval_cfg,
+                backend=cfg.backend,
+                batch_size=cfg.batch_size,
+                max_new_tokens=cfg.max_new_tokens,
+                limit=cfg.limit,
+            )
+            best_checkpoint = selection_result["best"]
+            selected_model_path = str(best_checkpoint["checkpoint_path"])
+            selected_global_step = int(best_checkpoint["global_step"])
+            holdout_metrics = best_checkpoint["metrics"]
+            holdout_result_path = str(best_checkpoint["result_path"])
+            holdout_raw_result_path = str(best_checkpoint["raw_result_path"])
+            checkpoint_ranking_path = str(selection_result["ranking_path"])
+            checkpoint_best_path = str(selection_result["best_path"])
+        else:
+            holdout_eval = evaluate_single_dataset(
+                model_name=str(train_output_dir),
+                dataset_path=cfg.stop_dataset,
+                eval_cfg=eval_cfg,
+                output_dir=round_paths["output_dir"] / "holdout_eval",
+                backend=cfg.backend,
+                batch_size=cfg.batch_size,
+                max_new_tokens=cfg.max_new_tokens,
+                limit=cfg.limit,
+            )
+            holdout_metrics = holdout_eval["result"]["metrics"]
+            selected_model_path = str(train_output_dir)
+            selected_global_step = 0
+            holdout_result_path = str(holdout_eval["result_path"])
+            holdout_raw_result_path = str(holdout_eval["raw_result_path"])
+            checkpoint_ranking_path = ""
+            checkpoint_best_path = ""
         holdout_accuracy = float(holdout_metrics.get("normalized_accuracy", 0.0))
         improved = _is_improved(
             holdout_accuracy,
@@ -415,7 +496,7 @@ def run_on_policy_loop(
         if improved:
             best_holdout_accuracy = holdout_accuracy
             best_round_index = round_index
-            best_model_path = str(train_output_dir)
+            best_model_path = selected_model_path
             no_improve_rounds = 0
         else:
             no_improve_rounds += 1
@@ -438,25 +519,37 @@ def run_on_policy_loop(
             "generation_model": current_model,
             "query_strategy": cfg.query_strategy,
             "primary_selector": str(data_result["report"].get("primary_selector", "")),
+            "train_selector": str(trainset_report["train_selector"]),
             "round_query_count": cfg.round_query_count,
             "retained_count": int(retained_report["kept"]),
             "retained_ratio": float(retained_report["retained_ratio"]),
+            "mixed_count": int(trainset_report["mixed_count"]),
+            "anchor_count": int(trainset_report["anchor_count"]),
+            "anchor_target": int(trainset_report["anchor_target"]),
+            "train_sample_count": int(trainset_report["train_sample_count"]),
+            "train_dataset_path": str(train_dataset_path),
             "query_sampling": sampler_report,
+            "trainset_sampling": trainset_report,
             "query_strategy_update": strategy_update,
-            "round_model_path": str(train_output_dir),
+            "round_model_path": selected_model_path,
+            "round_output_dir": str(train_output_dir),
+            "selected_checkpoint_path": selected_model_path,
+            "selected_checkpoint_step": selected_global_step,
+            "checkpoint_ranking_path": checkpoint_ranking_path,
+            "checkpoint_best_path": checkpoint_best_path,
             "stop_dataset": str(cfg.stop_dataset),
             "holdout_accuracy": holdout_accuracy,
             "improved": improved,
             "best_holdout_accuracy_so_far": best_holdout_accuracy,
             "no_improve_rounds": no_improve_rounds,
-            "holdout_result_path": str(holdout_eval["result_path"]),
-            "holdout_raw_result_path": str(holdout_eval["raw_result_path"]),
+            "holdout_result_path": holdout_result_path,
+            "holdout_raw_result_path": holdout_raw_result_path,
             "data_report_path": str(data_result["report_path"]),
             "retained_output_paths": data_result.get("retained_output_paths", {}),
         }
         _write_json(round_paths["round_summary_path"], round_summary)
         round_summaries.append(round_summary)
-        current_model = str(train_output_dir)
+        current_model = selected_model_path
         if no_improve_rounds >= cfg.patience:
             stop_reason = "no_improvement"
         _write_json(
@@ -471,6 +564,7 @@ def run_on_policy_loop(
                 no_improve_rounds=no_improve_rounds,
                 stop_reason=stop_reason,
                 query_sampler_state=dump_query_sampler_state(query_sampler_state),
+                anchor_sampler_state=dump_query_sampler_state(anchor_sampler_state),
                 query_strategy_state_path=(
                     str(mixed_strategy_state["state_path"])
                     if mixed_strategy_state is not None
@@ -514,6 +608,7 @@ def run_on_policy_loop(
             no_improve_rounds=no_improve_rounds,
             stop_reason=stop_reason,
             query_sampler_state=dump_query_sampler_state(query_sampler_state),
+            anchor_sampler_state=dump_query_sampler_state(anchor_sampler_state),
             query_strategy_state_path=(
                 str(mixed_strategy_state["state_path"])
                 if mixed_strategy_state is not None

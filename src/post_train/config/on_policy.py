@@ -64,13 +64,21 @@ class OnPolicyLoopConfig(BaseModel):
     eval_config: Path = Path("configs/eval/default.yaml")
     stop_dataset: Path = Path("data/eval/global_dev_math500_150.jsonl")
     max_rounds: int = Field(default=10, ge=1)
-    round_query_count: int = Field(default=256, ge=1)
+    round_query_count: int = Field(default=512, ge=1)
     query_strategy: Literal["uniform_epoch", "mixed_bootstrap_candidate"] = "uniform_epoch"
     bootstrap_all_correct_raw_samples: Path | None = None
     candidate_query_file: Path | None = None
     bootstrap_ratio: float = Field(default=0.3, ge=0.0, le=1.0)
     candidate_ratio: float = Field(default=0.7, ge=0.0, le=1.0)
     candidate_freeze_all_correct_hits: int = Field(default=2, ge=1)
+    train_selector: Literal["primary_retained", "mixed_plus_anchor"] = "mixed_plus_anchor"
+    anchor_dataset_path: Path | None = Path("data/stage1_train_5000.jsonl")
+    anchor_share: float = Field(default=0.25, gt=0.0, lt=1.0)
+    train_epochs: float = Field(default=1.0, gt=0.0)
+    train_learning_rate: float = Field(default=5.0e-6, gt=0.0)
+    checkpoint_selection_enabled: bool = True
+    checkpoint_target_count: int = Field(default=4, ge=1)
+    checkpoint_save_total_limit: int = Field(default=4, ge=1)
     patience: int = Field(default=3, ge=1)
     min_delta: float = Field(default=0.0, ge=0.0)
     round_base_dir: Path = Path("outputs/on_policy_loop")
@@ -90,4 +98,6 @@ class OnPolicyLoopConfig(BaseModel):
                 raise ValueError("mixed_bootstrap_candidate 需要提供 bootstrap_all_correct_raw_samples。")
             if self.candidate_query_file is None:
                 raise ValueError("mixed_bootstrap_candidate 需要提供 candidate_query_file。")
+        if self.train_selector == "mixed_plus_anchor" and self.anchor_dataset_path is None:
+            raise ValueError("mixed_plus_anchor 需要提供 anchor_dataset_path。")
         return self

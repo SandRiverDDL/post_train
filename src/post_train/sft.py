@@ -125,6 +125,7 @@ def train_sft(cfg) -> Path:
     )
     trainer.train()
     output_dir = ensure_parent(cfg.output_dir / "placeholder.txt").parent
-    trainer.save_model(str(output_dir))
-    tokenizer.save_pretrained(str(output_dir))
+    if cfg.export_final_model:
+        trainer.save_model(str(output_dir))
+        tokenizer.save_pretrained(str(output_dir))
     return output_dir

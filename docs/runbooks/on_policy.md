@@ -83,11 +83,15 @@
 默认行为：
 
 - 从 `seed_model` 开始进入 round1
-- 每轮抽样数量由 `round_query_count` 单独控制，默认 `256`
+- 每轮抽样数量由 `round_query_count` 单独控制，默认 `512`
 - 当前主配置默认 `query_strategy=mixed_bootstrap_candidate`
 - 每轮自动串起 `prepare -> train -> holdout eval`
 - bootstrap 池来自 `data/on_policy/raw_samples.round1.jsonl` 中的 `all_correct`
 - candidate 池默认是 `data/on_policy/candidate_pool.mixed_1000.jsonl`
+- 训练集默认不是直接用 primary retained，而是 `mixed_plus_anchor`
+- anchor 默认来自 `data/stage1_train_5000.jsonl` 的原始轨迹，目标占比 `25%`
+- 每轮训练默认 `1 epoch`，并在轮内自动保存约 `3~4` 个 checkpoints
+- 每轮正式推进到下一轮的 teacher 是该轮 dev 上选出的 best checkpoint
 - 连续 `3` 轮没有更高的 holdout accuracy 就停止
 - 默认最多跑 `10` 轮
 - `--resume` 只用于恢复未完成 run，不用于继续一个已自然结束的实验
