@@ -1,0 +1,23 @@
+model_name: outputs/stage1_sft_5000/checkpoint-200
+train_dataset: data/on_policy/train.round1.jsonl
+output_dir: outputs/on_policy_opsft/round1
+seed: 42
+max_seq_length: 1536
+learning_rate: 5.0e-7
+
+epochs: 1
+batch_size: 8
+gradient_accumulation_steps: 2
+lora_rank: 16
+lora_alpha: 32
+lora_dropout: 0.0
+warmup_ratio: 0.03
+weight_decay: 0.01
+logging_steps: 5
+group_by_length: true
+
+loss_mode: opsft
+profit_enabled: false
+profit_threshold: 0.1
+
+save_strategy: "no"

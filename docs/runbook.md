@@ -52,7 +52,7 @@
 .venv/bin/python scripts/run_on_policy_loop.py --config configs/on_policy/loop.yaml
 ```
 
-当前 loop 里每轮抽样数量由 `round_query_count` 控制，默认 `256`。
+当前默认主线 [configs/on_policy/loop.yaml](/home/chy/code/active/post_train/configs/on_policy/loop.yaml) 是 `512 prompt / round`；如果要跑论文迁移版 `opSFT`，优先看 [on_policy.md](/home/chy/code/active/post_train/docs/runbooks/on_policy.md) 里的 `loop_opsft_smallpool.yaml`。
 
 ## 按任务跳转
 

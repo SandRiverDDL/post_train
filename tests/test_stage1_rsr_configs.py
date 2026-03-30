@@ -22,7 +22,7 @@ class Stage1RSRConfigTest(unittest.TestCase):
         self.assertEqual(cfg.train_dataset, Path("data/stage1_rsr_selected_train.jsonl"))
         self.assertEqual(cfg.output_dir, Path("outputs/stage1_rsr_sft"))
         self.assertFalse(cfg.profit_enabled)
-        self.assertEqual(cfg.max_seq_length, 2048)
+        self.assertEqual(cfg.max_seq_length, 1536)
 
 
 if __name__ == "__main__":

@@ -382,6 +382,65 @@ class OnPolicyLoopTest(unittest.TestCase):
         self.assertEqual(result["summary"]["best_round_index"], 2)
         self.assertEqual(result["summary"]["best_model_path"], str(round_base_dir / "round2/checkpoint-16"))
 
+    def test_run_on_policy_loop_can_hold_teacher_at_best_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            loop_cfg = load_on_policy_loop_config("configs/on_policy/loop_opsft_smallpool.yaml").model_copy(
+                update={
+                    "round_base_dir": tmp_path / "outputs",
+                    "data_base_dir": tmp_path / "data",
+                    "max_rounds": 3,
+                    "round_query_count": 4,
+                    "seed_model": "seed-model",
+                    "train_selector": "primary_retained",
+                }
+            )
+            data_cfg = load_on_policy_data_config("configs/on_policy/data_opsft_smallpool.yaml")
+            data_result = {
+                "retained_output_paths": {
+                    "any_correct_shortest": str(tmp_path / "data/round/train.jsonl"),
+                    "mixed_only_shortest": str(tmp_path / "data/round/train.mixed.jsonl"),
+                },
+                "retained_output_path": str(tmp_path / "data/round/train.jsonl"),
+                "report_path": str(tmp_path / "data/round/train.report.json"),
+                "report": {"retained": {"kept": 20, "retained_ratio": 0.5}},
+            }
+            loop_queries = [
+                {"id": f"q{i}", "question": f"Question {i}", "final_answer": str(i), "meta": {"source": "toy"}}
+                for i in range(20)
+            ]
+            holdout_scores = [0.70, 0.69, 0.68]
+
+            with patch("post_train.on_policy_loop.load_on_policy_data_config", return_value=data_cfg), \
+                patch("post_train.on_policy_loop.load_sft_config", return_value=load_sft_config("configs/on_policy/opsft.yaml")), \
+                patch("post_train.on_policy_loop.load_eval_config"), \
+                patch("post_train.on_policy_loop.load_query_candidates", return_value=(loop_queries, {"available_rows": 20})), \
+                patch("post_train.on_policy_loop.build_candidate_random_query_strategy", return_value={"state_path": tmp_path / "data/query_strategy/state.json", "candidate_rows": loop_queries[:5], "random_rows": loop_queries[5:]}), \
+                patch("post_train.on_policy_loop.sample_candidate_random_round_queries", return_value=(loop_queries[:4], {"effective_query_count": 4, "source_mix": {"candidate_sampled": 2, "random_sampled": 2}})), \
+                patch("post_train.on_policy_loop.persist_candidate_random_query_strategy_state"), \
+                patch("post_train.on_policy_loop.prepare_on_policy_sft_dataset_from_queries", return_value=data_result), \
+                patch("post_train.on_policy_loop.train_sft") as mock_train, \
+                patch(
+                    "post_train.on_policy_loop.run_checkpoint_selection",
+                    side_effect=lambda **kwargs: {
+                        "best": {
+                            "checkpoint_path": str(Path(kwargs["train_output_dir"]) / "checkpoint-8"),
+                            "global_step": 8,
+                            "metrics": {"normalized_accuracy": holdout_scores.pop(0)},
+                            "result_path": str(tmp_path / "result.json"),
+                            "raw_result_path": str(tmp_path / "raw.json"),
+                        },
+                        "ranking_path": str(tmp_path / "ranking.json"),
+                        "best_path": str(tmp_path / "best.json"),
+                    },
+                ):
+                mock_train.side_effect = lambda cfg: Path(cfg.output_dir)
+                result = run_on_policy_loop(loop_cfg)
+                history = json.loads(Path(result["history_path"]).read_text(encoding="utf-8"))
+                round3 = history["rounds"][2]
+                self.assertEqual(result["summary"]["best_round_index"], 1)
+                self.assertEqual(round3["generation_model"], str(tmp_path / "outputs/round1/checkpoint-8"))
+
     def test_run_on_policy_loop_rejects_resume_for_finished_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)

@@ -78,6 +78,7 @@ class SFTProfitLossTest(unittest.TestCase):
         loss, metrics = _compute_sft_loss(
             logits,
             labels,
+            loss_mode="standard",
             profit_enabled=False,
             profit_threshold=0.1,
         )
@@ -106,6 +107,7 @@ class SFTProfitLossTest(unittest.TestCase):
         loss, metrics = _compute_sft_loss(
             logits,
             labels,
+            loss_mode="standard",
             profit_enabled=True,
             profit_threshold=0.1,
         )
@@ -136,6 +138,7 @@ class SFTProfitLossTest(unittest.TestCase):
         loss, metrics = _compute_sft_loss(
             logits,
             labels,
+            loss_mode="standard",
             profit_enabled=True,
             profit_threshold=0.99,
         )
@@ -170,12 +173,82 @@ class SFTProfitLossTest(unittest.TestCase):
         loss, metrics = _compute_sft_loss(
             logits,
             labels,
+            loss_mode="standard",
             profit_enabled=True,
             profit_threshold=0.1,
         )
 
         self.assertTrue(torch.isfinite(loss))
         self.assertEqual(metrics["valid_tokens"], 2.0)
+
+    def test_compute_sft_loss_supports_opsft_batch_max_normalization(self) -> None:
+        logits = torch.tensor(
+            [
+                [
+                    [0.0, 2.0, 0.0],
+                    [0.0, 2.0, 0.0],
+                    [0.0, 2.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ],
+                [
+                    [0.0, 2.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ],
+            ],
+            dtype=torch.float32,
+        )
+        labels = torch.tensor(
+            [
+                [-100, 1, 1, 1],
+                [-100, 1, -100, -100],
+            ],
+            dtype=torch.long,
+        )
+
+        loss, metrics = _compute_sft_loss(
+            logits,
+            labels,
+            loss_mode="opsft",
+            profit_enabled=False,
+            profit_threshold=0.1,
+        )
+
+        shift_logits = logits[..., :-1, :]
+        shift_labels = labels[..., 1:]
+        per_token = torch.nn.functional.cross_entropy(
+            shift_logits.reshape(-1, logits.size(-1)),
+            shift_labels.reshape(-1),
+            ignore_index=-100,
+            reduction="none",
+        ).reshape_as(shift_labels)
+        sample_sums = torch.tensor(
+            [
+                float(per_token[0, :].sum().item()),
+                float(per_token[1, 0].item()),
+            ]
+        )
+        expected = ((sample_sums[0] / 3.0) + (sample_sums[1] / 3.0)) / 2.0
+        self.assertAlmostEqual(loss.item(), expected.item(), places=6)
+        self.assertEqual(metrics["opsft_batch_max_completion_tokens"], 3.0)
+        self.assertEqual(metrics["opsft_effective_sample_count"], 2.0)
+
+    def test_compute_sft_loss_opsft_returns_zero_for_empty_batch(self) -> None:
+        logits = torch.zeros((1, 3, 4), dtype=torch.float32)
+        labels = torch.full((1, 3), -100, dtype=torch.long)
+
+        loss, metrics = _compute_sft_loss(
+            logits,
+            labels,
+            loss_mode="opsft",
+            profit_enabled=False,
+            profit_threshold=0.1,
+        )
+
+        self.assertEqual(loss.item(), 0.0)
+        self.assertEqual(metrics["opsft_effective_sample_count"], 0.0)
+        self.assertEqual(metrics["opsft_zero_completion_batches"], 1.0)
 
 
 if __name__ == "__main__":

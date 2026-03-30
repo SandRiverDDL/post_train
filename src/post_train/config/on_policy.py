@@ -65,17 +65,19 @@ class OnPolicyLoopConfig(BaseModel):
     stop_dataset: Path = Path("data/eval/global_dev_math500_150.jsonl")
     max_rounds: int = Field(default=10, ge=1)
     round_query_count: int = Field(default=512, ge=1)
-    query_strategy: Literal["uniform_epoch", "mixed_bootstrap_candidate"] = "uniform_epoch"
+    query_strategy: Literal["uniform_epoch", "mixed_bootstrap_candidate", "candidate_random_mix"] = "uniform_epoch"
     bootstrap_all_correct_raw_samples: Path | None = None
     candidate_query_file: Path | None = None
     bootstrap_ratio: float = Field(default=0.3, ge=0.0, le=1.0)
     candidate_ratio: float = Field(default=0.7, ge=0.0, le=1.0)
+    random_ratio: float = Field(default=0.3, ge=0.0, le=1.0)
     candidate_freeze_all_correct_hits: int = Field(default=2, ge=1)
     train_selector: Literal["primary_retained", "mixed_plus_anchor"] = "mixed_plus_anchor"
     anchor_dataset_path: Path | None = Path("data/stage1_train_5000.jsonl")
     anchor_share: float = Field(default=0.25, gt=0.0, lt=1.0)
     train_epochs: float = Field(default=1.0, gt=0.0)
     train_learning_rate: float = Field(default=5.0e-6, gt=0.0)
+    advance_teacher_on_improvement_only: bool = False
     checkpoint_selection_enabled: bool = True
     checkpoint_target_count: int = Field(default=4, ge=1)
     checkpoint_save_total_limit: int = Field(default=4, ge=1)
@@ -91,13 +93,19 @@ class OnPolicyLoopConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_strategy(self) -> "OnPolicyLoopConfig":
         ratio_sum = self.bootstrap_ratio + self.candidate_ratio
-        if abs(ratio_sum - 1.0) > 1.0e-6:
+        if self.query_strategy == "mixed_bootstrap_candidate" and abs(ratio_sum - 1.0) > 1.0e-6:
             raise ValueError("bootstrap_ratio 与 candidate_ratio 之和必须等于 1.0。")
+        if self.query_strategy == "candidate_random_mix":
+            ratio_sum = self.candidate_ratio + self.random_ratio
+            if abs(ratio_sum - 1.0) > 1.0e-6:
+                raise ValueError("candidate_ratio 与 random_ratio 之和必须等于 1.0。")
         if self.query_strategy == "mixed_bootstrap_candidate":
             if self.bootstrap_all_correct_raw_samples is None:
                 raise ValueError("mixed_bootstrap_candidate 需要提供 bootstrap_all_correct_raw_samples。")
             if self.candidate_query_file is None:
                 raise ValueError("mixed_bootstrap_candidate 需要提供 candidate_query_file。")
+        if self.query_strategy == "candidate_random_mix" and self.candidate_query_file is None:
+            raise ValueError("candidate_random_mix 需要提供 candidate_query_file。")
         if self.train_selector == "mixed_plus_anchor" and self.anchor_dataset_path is None:
             raise ValueError("mixed_plus_anchor 需要提供 anchor_dataset_path。")
         return self

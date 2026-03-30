@@ -1,0 +1,29 @@
+seed_model: outputs/stage1_sft_5000/checkpoint-200
+base_on_policy_data_config: configs/on_policy/data_opsft.yaml
+base_sft_config: configs/on_policy/opsft.yaml
+eval_config: configs/eval/default.yaml
+stop_dataset: data/eval/global_dev_math500_150.jsonl
+
+max_rounds: 10
+round_query_count: 512
+query_strategy: mixed_bootstrap_candidate
+bootstrap_all_correct_raw_samples: data/on_policy/raw_samples.round1.jsonl
+candidate_query_file: data/on_policy/candidate_pool.mixed_1000.jsonl
+bootstrap_ratio: 0.3
+candidate_ratio: 0.7
+candidate_freeze_all_correct_hits: 2
+
+train_selector: mixed_plus_anchor
+anchor_dataset_path: data/stage1_train_5000.jsonl
+anchor_share: 0.25
+train_epochs: 1
+train_learning_rate: 5.0e-7
+checkpoint_selection_enabled: true
+checkpoint_target_count: 4
+checkpoint_save_total_limit: 4
+
+patience: 3
+min_delta: 0.0
+
+round_base_dir: outputs/on_policy_loop_opsft
+data_base_dir: data/on_policy_loop_opsft

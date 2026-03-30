@@ -26,15 +26,21 @@ from post_train.on_policy_data import (
     prepare_on_policy_sft_dataset_from_queries,
 )
 from post_train.on_policy_query_strategy import (
+    STRATEGY_CANDIDATE_RANDOM_MIX,
     STRATEGY_MIXED_BOOTSTRAP_CANDIDATE,
+    build_candidate_random_query_strategy,
     build_mixed_query_strategy,
     build_query_sampler_state,
     dump_query_sampler_state,
+    load_candidate_random_query_strategy_state,
     load_mixed_query_strategy_state,
     load_query_sampler_state,
+    persist_candidate_random_query_strategy_state,
+    sample_candidate_random_round_queries,
     sample_mixed_round_queries,
     sample_round_queries,
     update_mixed_query_strategy,
+    normalize_question,
 )
 from post_train.on_policy_trainset import (
     build_mixed_plus_anchor_dataset,
@@ -291,6 +297,20 @@ def _history_payload(
         "rounds": rounds,
     }
 
+
+def _load_seen_query_questions(loop_cfg: OnPolicyLoopConfig, *, completed_rounds: int) -> set[str]:
+    seen_questions: set[str] = set()
+    for round_index in range(1, completed_rounds + 1):
+        query_path = build_round_paths(loop_cfg, round_index)["query_output_path"]
+        if not query_path.exists():
+            continue
+        rows = [json.loads(line) for line in query_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        for row in rows:
+            question = normalize_question(str(row.get("question", "")))
+            if question:
+                seen_questions.add(question)
+    return seen_questions
+
 def run_on_policy_loop(
     cfg: OnPolicyLoopConfig,
     *,
@@ -318,6 +338,7 @@ def run_on_policy_loop(
         else:
             anchor_sampler_state = build_query_sampler_state(anchor_rows, seed=base_data_cfg.seed + 2000)
     mixed_strategy_state: dict[str, Any] | None = None
+    candidate_random_strategy_state: dict[str, Any] | None = None
     if cfg.query_strategy == STRATEGY_MIXED_BOOTSTRAP_CANDIDATE:
         if run_state["mode"] == "resume":
             strategy_state_path = restored_history.get("query_strategy_state_path") or (
@@ -345,6 +366,29 @@ def run_on_policy_loop(
             "candidate_pool_size": len(mixed_strategy_state["candidate_rows"]),
         }
         query_sampler_state = None
+    elif cfg.query_strategy == STRATEGY_CANDIDATE_RANDOM_MIX:
+        query_rows, query_pool_report = load_query_candidates(base_data_cfg)
+        if run_state["mode"] == "resume":
+            strategy_state_path = restored_history.get("query_strategy_state_path") or (
+                cfg.data_base_dir / "query_strategy" / "state.json"
+            )
+            candidate_random_strategy_state = load_candidate_random_query_strategy_state(strategy_state_path)
+        else:
+            candidate_random_strategy_state = build_candidate_random_query_strategy(
+                random_query_rows=query_rows,
+                candidate_query_file=cfg.candidate_query_file,
+                data_base_dir=cfg.data_base_dir,
+                seed=base_data_cfg.seed,
+                candidate_ratio=cfg.candidate_ratio,
+                random_ratio=cfg.random_ratio,
+            )
+        query_pool_report = {
+            "query_strategy": cfg.query_strategy,
+            "candidate_query_file": str(cfg.candidate_query_file),
+            "random_pool_size": len(candidate_random_strategy_state["random_rows"]),
+            "candidate_pool_size": len(candidate_random_strategy_state["candidate_rows"]),
+        }
+        query_sampler_state = None
     else:
         query_rows, query_pool_report = load_query_candidates(base_data_cfg)
         if run_state["mode"] == "resume":
@@ -370,6 +414,7 @@ def run_on_policy_loop(
     stop_reason: str | None = None
     round_summaries: list[dict[str, Any]] = list(restored_history.get("rounds", []))
     start_round_index = int(restored_history.get("last_completed_round", 0)) + 1
+    seen_query_questions = _load_seen_query_questions(cfg, completed_rounds=start_round_index - 1)
 
     for round_index in range(start_round_index, cfg.max_rounds + 1):
         round_name = build_round_name(round_index)
@@ -388,6 +433,13 @@ def run_on_policy_loop(
                     mixed_strategy_state,
                     requested_count=cfg.round_query_count,
                 )
+            elif cfg.query_strategy == STRATEGY_CANDIDATE_RANDOM_MIX:
+                if candidate_random_strategy_state is None:
+                    raise ValueError("candidate_random strategy state 未初始化。")
+                round_queries, sampler_report = sample_candidate_random_round_queries(
+                    candidate_random_strategy_state,
+                    requested_count=cfg.round_query_count,
+                )
             else:
                 if query_sampler_state is None:
                     raise ValueError("uniform sampler state 未初始化。")
@@ -401,6 +453,17 @@ def run_on_policy_loop(
             round_query_report["effective_query_count"] = sampler_report["effective_query_count"]
             round_query_report["round_query_count"] = cfg.round_query_count
             round_query_report["query_strategy"] = cfg.query_strategy
+            current_round_questions = {
+                normalize_question(str(row.get("question", "")))
+                for row in round_queries
+            }
+            reused_query_count = len(current_round_questions & seen_query_questions)
+            round_query_report["query_reuse_ratio"] = (
+                reused_query_count / len(current_round_questions)
+                if current_round_questions
+                else 0.0
+            )
+            round_query_report["reused_query_count"] = reused_query_count
             data_result = prepare_on_policy_sft_dataset_from_queries(
                 data_cfg,
                 query_rows=round_queries,
@@ -509,6 +572,14 @@ def run_on_policy_loop(
                 raw_samples_path=data_result["raw_samples_output_path"],
                 round_index=round_index,
             )
+        elif cfg.query_strategy == STRATEGY_CANDIDATE_RANDOM_MIX:
+            if candidate_random_strategy_state is None:
+                raise ValueError("candidate_random strategy state 未初始化。")
+            persist_candidate_random_query_strategy_state(candidate_random_strategy_state)
+            strategy_update = {
+                "candidate_pool_size": len(candidate_random_strategy_state["candidate_rows"]),
+                "random_pool_size": len(candidate_random_strategy_state["random_rows"]),
+            }
         else:
             strategy_update = {}
 
@@ -549,7 +620,11 @@ def run_on_policy_loop(
         }
         _write_json(round_paths["round_summary_path"], round_summary)
         round_summaries.append(round_summary)
-        current_model = selected_model_path
+        seen_query_questions.update(current_round_questions)
+        if cfg.advance_teacher_on_improvement_only and not improved:
+            current_model = best_model_path or current_model
+        else:
+            current_model = selected_model_path
         if no_improve_rounds >= cfg.patience:
             stop_reason = "no_improvement"
         _write_json(
@@ -568,6 +643,8 @@ def run_on_policy_loop(
                 query_strategy_state_path=(
                     str(mixed_strategy_state["state_path"])
                     if mixed_strategy_state is not None
+                    else str(candidate_random_strategy_state["state_path"])
+                    if candidate_random_strategy_state is not None
                     else ""
                 ),
             ),
@@ -593,6 +670,8 @@ def run_on_policy_loop(
         "query_strategy_state_path": (
             str(mixed_strategy_state["state_path"])
             if mixed_strategy_state is not None
+            else str(candidate_random_strategy_state["state_path"])
+            if candidate_random_strategy_state is not None
             else ""
         ),
     }
@@ -612,6 +691,8 @@ def run_on_policy_loop(
             query_strategy_state_path=(
                 str(mixed_strategy_state["state_path"])
                 if mixed_strategy_state is not None
+                else str(candidate_random_strategy_state["state_path"])
+                if candidate_random_strategy_state is not None
                 else ""
             ),
         ),

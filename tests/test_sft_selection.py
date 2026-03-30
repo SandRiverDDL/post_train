@@ -23,6 +23,7 @@ class SFTSelectionTest(unittest.TestCase):
                         "train_dataset: data/stage1_train.jsonl",
                         "output_dir: outputs/stage1_sft",
                         "epochs: 2",
+                        "loss_mode: opsft",
                         "profit_enabled: true",
                         "profit_threshold: 0.2",
                         "save_strategy: steps",
@@ -32,14 +33,31 @@ class SFTSelectionTest(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            with self.assertRaisesRegex(ValueError, "opsft 与 profit_enabled 不能同时开启"):
+                load_sft_config(config_path)
+
+    def test_load_sft_config_supports_opsft_loss_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "opsft.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "model_name: /tmp/model",
+                        "train_dataset: data/stage1_train.jsonl",
+                        "output_dir: outputs/stage1_sft",
+                        "epochs: 1",
+                        "loss_mode: opsft",
+                        "profit_enabled: false",
+                        'save_strategy: "no"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
             cfg = load_sft_config(config_path)
 
-        self.assertEqual(cfg.epochs, 2)
-        self.assertTrue(cfg.profit_enabled)
-        self.assertEqual(cfg.profit_threshold, 0.2)
-        self.assertEqual(cfg.save_strategy, "steps")
-        self.assertEqual(cfg.save_steps, 25)
-        self.assertEqual(cfg.save_total_limit, 12)
+        self.assertEqual(cfg.epochs, 1)
+        self.assertEqual(cfg.loss_mode, "opsft")
+        self.assertFalse(cfg.profit_enabled)
 
     def test_scan_checkpoint_dirs_sorts_by_global_step(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

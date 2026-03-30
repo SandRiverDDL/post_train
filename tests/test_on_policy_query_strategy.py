@@ -11,7 +11,10 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.on_policy_query_strategy import (
     MIXED_SOURCE_CANDIDATE,
+    MIXED_SOURCE_RANDOM,
+    build_candidate_random_query_strategy,
     build_mixed_query_strategy,
+    sample_candidate_random_round_queries,
     sample_mixed_round_queries,
     update_mixed_query_strategy,
 )
@@ -25,6 +28,42 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 
 
 class OnPolicyQueryStrategyTest(unittest.TestCase):
+    def test_sample_candidate_random_round_queries_respects_ratio(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            candidate_path = tmp_path / "candidate_pool.jsonl"
+            _write_jsonl(
+                candidate_path,
+                [
+                    {"id": f"c{i}", "question": f"Candidate {i}", "final_answer": str(i), "meta": {"source": "cand"}}
+                    for i in range(6)
+                ],
+            )
+            random_rows = [
+                {"id": f"r{i}", "question": f"Random {i}", "final_answer": str(i), "meta": {"source": "rand"}}
+                for i in range(6)
+            ]
+
+            state = build_candidate_random_query_strategy(
+                random_query_rows=random_rows,
+                candidate_query_file=candidate_path,
+                data_base_dir=tmp_path / "data",
+                seed=11,
+                candidate_ratio=0.5,
+                random_ratio=0.5,
+            )
+            round_rows, report = sample_candidate_random_round_queries(state, requested_count=8)
+
+        self.assertEqual(len(round_rows), 8)
+        self.assertEqual(report["source_mix"]["candidate_target"], 4)
+        self.assertEqual(report["source_mix"]["random_target"], 4)
+        self.assertEqual(report["source_mix"]["candidate_sampled"], 4)
+        self.assertEqual(report["source_mix"]["random_sampled"], 4)
+        self.assertEqual(
+            {row["meta"]["on_policy_query_strategy_source"] for row in round_rows},
+            {MIXED_SOURCE_CANDIDATE, MIXED_SOURCE_RANDOM},
+        )
+
     def test_sample_mixed_round_queries_respects_ratio(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)

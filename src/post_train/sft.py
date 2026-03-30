@@ -56,6 +56,7 @@ def _compute_sft_loss(
     logits: torch.Tensor,
     labels: torch.Tensor,
     *,
+    loss_mode: str,
     profit_enabled: bool,
     profit_threshold: float,
 ) -> tuple[torch.Tensor, dict[str, float]]:
@@ -67,6 +68,35 @@ def _compute_sft_loss(
     log_probs = F.log_softmax(shift_logits, dim=-1)
     token_nll = -log_probs.gather(dim=-1, index=safe_labels.unsqueeze(-1)).squeeze(-1)
     gold_prob = torch.exp(-token_nll.detach())
+
+    completion_lengths = valid_mask.sum(dim=-1)
+    effective_sample_mask = completion_lengths.gt(0)
+    effective_sample_count = int(effective_sample_mask.sum().item())
+    batch_max_completion = int(completion_lengths.max().item()) if effective_sample_count > 0 else 0
+    avg_completion_tokens = (
+        float(completion_lengths[effective_sample_mask].float().mean().item())
+        if effective_sample_count > 0
+        else 0.0
+    )
+
+    if loss_mode == "opsft":
+        if effective_sample_count == 0 or batch_max_completion == 0:
+            loss = logits.sum() * 0.0
+        else:
+            sample_sums = (token_nll * valid_mask.to(token_nll.dtype)).sum(dim=-1)
+            normalized = sample_sums[effective_sample_mask] / float(batch_max_completion)
+            loss = normalized.mean()
+        return loss, {
+            "valid_tokens": float(valid_mask.sum().item()),
+            "kept_tokens": float(valid_mask.sum().item()),
+            "filtered_tokens": 0.0,
+            "empty_batches": 1.0 if effective_sample_count == 0 else 0.0,
+            "avg_gold_prob": 0.0,
+            "opsft_batch_max_completion_tokens": float(batch_max_completion),
+            "opsft_avg_completion_tokens": avg_completion_tokens,
+            "opsft_effective_sample_count": float(effective_sample_count),
+            "opsft_zero_completion_batches": 1.0 if effective_sample_count == 0 else 0.0,
+        }
 
     keep_mask = valid_mask
     if profit_enabled:
@@ -87,6 +117,10 @@ def _compute_sft_loss(
         "filtered_tokens": float(valid_count - kept_count),
         "empty_batches": 1.0 if valid_count > 0 and kept_count == 0 else 0.0,
         "avg_gold_prob": avg_gold_prob,
+        "opsft_batch_max_completion_tokens": 0.0,
+        "opsft_avg_completion_tokens": 0.0,
+        "opsft_effective_sample_count": 0.0,
+        "opsft_zero_completion_batches": 0.0,
     }
 
 
@@ -124,8 +158,9 @@ def train_sft(cfg) -> Path:
     from unsloth import FastLanguageModel
 
     class ProfitSFTTrainer(SFTTrainer):
-        def __init__(self, *args, profit_enabled: bool, profit_threshold: float, **kwargs) -> None:
+        def __init__(self, *args, loss_mode: str, profit_enabled: bool, profit_threshold: float, **kwargs) -> None:
             super().__init__(*args, **kwargs)
+            self.loss_mode = loss_mode
             self.profit_enabled = profit_enabled
             self.profit_threshold = profit_threshold
             self._reset_profit_stats()
@@ -137,6 +172,11 @@ def train_sft(cfg) -> Path:
                 "filtered_tokens": 0.0,
                 "empty_batches": 0.0,
                 "avg_gold_prob_weighted_sum": 0.0,
+                "opsft_batch_max_completion_tokens_sum": 0.0,
+                "opsft_avg_completion_tokens_sum": 0.0,
+                "opsft_effective_sample_count_sum": 0.0,
+                "opsft_zero_completion_batches": 0.0,
+                "step_count": 0.0,
             }
 
         def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
@@ -147,6 +187,7 @@ def train_sft(cfg) -> Path:
             loss, metrics = _compute_sft_loss(
                 logits,
                 labels,
+                loss_mode=self.loss_mode,
                 profit_enabled=self.profit_enabled,
                 profit_threshold=self.profit_threshold,
             )
@@ -155,10 +196,28 @@ def train_sft(cfg) -> Path:
             self._profit_stats["filtered_tokens"] += metrics["filtered_tokens"]
             self._profit_stats["empty_batches"] += metrics["empty_batches"]
             self._profit_stats["avg_gold_prob_weighted_sum"] += metrics["avg_gold_prob"] * metrics["kept_tokens"]
+            self._profit_stats["opsft_batch_max_completion_tokens_sum"] += metrics["opsft_batch_max_completion_tokens"]
+            self._profit_stats["opsft_avg_completion_tokens_sum"] += metrics["opsft_avg_completion_tokens"]
+            self._profit_stats["opsft_effective_sample_count_sum"] += metrics["opsft_effective_sample_count"]
+            self._profit_stats["opsft_zero_completion_batches"] += metrics["opsft_zero_completion_batches"]
+            self._profit_stats["step_count"] += 1.0
             return (loss, outputs) if return_outputs else loss
 
         def log(self, logs: dict[str, float], start_time=None) -> None:
-            if self.profit_enabled and self._profit_stats["valid_tokens"] > 0:
+            if self.loss_mode == "opsft" and self._profit_stats["step_count"] > 0:
+                logs = dict(logs)
+                step_count = self._profit_stats["step_count"]
+                logs["opsft_batch_max_completion_tokens"] = (
+                    self._profit_stats["opsft_batch_max_completion_tokens_sum"] / step_count
+                )
+                logs["opsft_avg_completion_tokens"] = (
+                    self._profit_stats["opsft_avg_completion_tokens_sum"] / step_count
+                )
+                logs["opsft_effective_sample_count"] = (
+                    self._profit_stats["opsft_effective_sample_count_sum"] / step_count
+                )
+                logs["opsft_zero_completion_batch_count"] = self._profit_stats["opsft_zero_completion_batches"]
+            elif self.profit_enabled and self._profit_stats["valid_tokens"] > 0:
                 logs = dict(logs)
                 valid_tokens = self._profit_stats["valid_tokens"]
                 kept_tokens = self._profit_stats["kept_tokens"]
@@ -220,6 +279,7 @@ def train_sft(cfg) -> Path:
         processing_class=tokenizer,
         train_dataset=train_dataset,
         args=training_args,
+        loss_mode=cfg.loss_mode,
         profit_enabled=cfg.profit_enabled,
         profit_threshold=cfg.profit_threshold,
     )

@@ -40,11 +40,18 @@
 .venv/bin/python scripts/train_sft.py --config configs/on_policy/sft_mixed.yaml
 ```
 
+按论文口径复现 `opSFT`：
+
+```bash
+.venv/bin/python scripts/train_sft.py --config configs/on_policy/opsft.yaml
+```
+
 默认行为：
 
 - 从 `outputs/stage1_sft_5000/checkpoint-200` 继续训练
 - 在 retained 数据上训练 `2 epoch`
 - 默认 `learning_rate=1e-5`
+- `configs/on_policy/opsft.yaml` 会切到 `loss_mode=opsft`、`1 epoch`、`learning_rate=5e-7`
 
 ## 单轮评测
 
@@ -68,6 +75,18 @@
 .venv/bin/python scripts/run_on_policy_loop.py --config configs/on_policy/loop.yaml
 ```
 
+按论文口径运行 `opSFT` loop：
+
+```bash
+.venv/bin/python scripts/run_on_policy_loop.py --config configs/on_policy/loop_opsft.yaml
+```
+
+按小池子迁移口径运行 `opSFT` loop：
+
+```bash
+.venv/bin/python scripts/run_on_policy_loop.py --config configs/on_policy/loop_opsft_smallpool.yaml
+```
+
 继续未完成 run：
 
 ```bash
@@ -83,8 +102,13 @@
 默认行为：
 
 - 从 `seed_model` 开始进入 round1
-- 每轮抽样数量由 `round_query_count` 单独控制，默认 `512`
+- `loop.yaml` 是当前默认 on-policy 主线：`512 prompt / round`，`query_strategy=mixed_bootstrap_candidate`
+- `loop_opsft.yaml` 是“大池子论文口径线”：延续 bootstrap+candidate query 结构，但训练目标改成 `opsft`
+- `loop_opsft_smallpool.yaml` 是“5000 题小池子迁移线”：`320 prompt / round`、`8 rollouts / prompt`、`candidate:random = 50:50`
 - 当前主配置默认 `query_strategy=mixed_bootstrap_candidate`
+- `configs/on_policy/data_opsft.yaml` 会把 rollout `temperature` 固定到 `1.0`
+- `configs/on_policy/data_opsft_smallpool.yaml` 会把 rollout `temperature` 固定到 `1.0`，并把 `responses_per_query` 提到 `8`
+- `configs/on_policy/loop_opsft_smallpool.yaml` 还会开启 `advance_teacher_on_improvement_only=true`，未提升轮不推进 teacher
 - 每轮自动串起 `prepare -> train -> holdout eval`
 - bootstrap 池来自 `data/on_policy/raw_samples.round1.jsonl` 中的 `all_correct`
 - candidate 池默认是 `data/on_policy/candidate_pool.mixed_1000.jsonl`
