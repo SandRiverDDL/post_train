@@ -12,6 +12,7 @@
 - 当前开发模型：`Qwen/Qwen2.5-Math-1.5B`
 - 当前 `stage1` 数据口径：`UWNSL/MATH_training_split_short_cot`，首版规模 `2000`
 - 当前保留一条独立 `stage1_mix_long` 实验线：`UWNSL/Mix-Long_long_0.2_short_0.8`
+- 当前保留一条独立 `stage1_math220k` 对照线：`qingy2024/OpenR1-Math-220k-Cleaned`
 - 当前 on-policy 数据口径：固定使用 `data/stage1_train_5000.jsonl` 作为 query registry，并保留全量轨迹归档
 - 当前基础起点：`outputs/stage1_sft_5000/checkpoint-200`
 - 当前评测结果目录口径：`outputs/eval/<模型路径>/<task>/result.json` 与 `raw.json`

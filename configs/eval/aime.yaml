@@ -13,11 +13,11 @@ seed: 42
 tasks:
   - name: aime24
     dataset_path: data/eval/aime24_test.jsonl
-    samples_per_problem: 4
+    samples_per_problem: 16
     sampling_temperature: 0.6
     sampling_top_p: 0.95
   - name: aime25
     dataset_path: data/eval/aime25_test.jsonl
-    samples_per_problem: 4
+    samples_per_problem: 16
     sampling_temperature: 0.6
     sampling_top_p: 0.95

@@ -90,6 +90,13 @@ def _compute_sft_loss(
     }
 
 
+def _extract_model_inputs(inputs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    model_inputs = {"input_ids": inputs["input_ids"]}
+    if "attention_mask" in inputs:
+        model_inputs["attention_mask"] = inputs["attention_mask"]
+    return model_inputs
+
+
 def preview_training_samples(path: str | Path, *, count: int = 3) -> str:
     rows = read_jsonl(path)[:count]
     parts: list[str] = []
@@ -134,10 +141,7 @@ def train_sft(cfg) -> Path:
 
         def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
             labels = inputs["labels"]
-            model_inputs = {
-                "input_ids": inputs["input_ids"],
-                "attention_mask": inputs["attention_mask"],
-            }
+            model_inputs = _extract_model_inputs(inputs)
             outputs = model(**model_inputs)
             logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
             loss, metrics = _compute_sft_loss(

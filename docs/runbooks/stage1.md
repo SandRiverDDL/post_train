@@ -21,6 +21,26 @@ Mix-Long stage1 实验线：
 .venv/bin/python scripts/prepare_stage2_mix_long_data.py --config configs/stage1/mix_long_data.yaml
 ```
 
+Math220K stage1 对照线：
+
+```bash
+.venv/bin/python scripts/prepare_stage1_math220k_data.py --config configs/stage1/math220k_data.yaml
+```
+
+RSR 候选池与二段筛选：
+
+```bash
+.venv/bin/python scripts/prepare_stage1_rsr_candidates.py --config configs/stage1/rsr_candidates.yaml
+.venv/bin/python scripts/select_stage1_rsr_dataset.py --config configs/stage1/rsr_select.yaml
+```
+
+RSR 默认规则：
+
+- 当前默认 `drop_truncated: true`
+- `prompt + solution` 超过 `max_seq_length` 的轨迹会直接丢弃，不再截断参与打分
+- 候选池报告会记录超长轨迹的舍弃比例
+- `rsr_select.yaml` 可选设置 `allowed_sources`，例如只从 `short/small/large` 中选，先排除 `long`
+
 默认规则：
 
 - 数据源固定为 `UWNSL/Mix-Long_long_0.2_short_0.8`
@@ -71,12 +91,26 @@ Mix-Long stage1 实验线训练：
 .venv/bin/python scripts/train_sft.py --config configs/stage1/mix_long_sft.yaml
 ```
 
+Math220K stage1 对照线训练：
+
+```bash
+.venv/bin/python scripts/train_sft.py --config configs/stage1/math220k_sft.yaml
+```
+
+RSR 筛选后的 stage1 训练：
+
+```bash
+.venv/bin/python scripts/train_sft.py --config configs/stage1/rsr_sft.yaml
+```
+
+这条线使用独立配置：
+
+- `train_dataset = data/stage1_rsr_selected_train.jsonl`
+- `output_dir = outputs/stage1_rsr_sft`
+
 这条线的默认差异：
 
-- `max_seq_length = 5120`
-- `batch_size = 4`
-- `gradient_accumulation_steps = 8`
-- 其余仍保持 stage1 的 `2 epoch` 与 checkpoint 选择口径
+- 其余超参与主 `stage1` 配置保持一致，便于把差异集中在数据集本身
 
 ## 选择 stage1 最优 checkpoint
 

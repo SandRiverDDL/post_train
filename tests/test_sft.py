@@ -10,7 +10,7 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from post_train.sft import _compute_sft_loss, _tokenize_prompt_completion, build_train_dataset
+from post_train.sft import _compute_sft_loss, _extract_model_inputs, _tokenize_prompt_completion, build_train_dataset
 
 
 class BoundaryMergingTokenizer:
@@ -145,6 +145,37 @@ class SFTProfitLossTest(unittest.TestCase):
         self.assertEqual(metrics["kept_tokens"], 0.0)
         self.assertEqual(metrics["filtered_tokens"], 2.0)
         self.assertEqual(metrics["empty_batches"], 1.0)
+
+    def test_compute_sft_loss_does_not_require_attention_mask(self) -> None:
+        model_inputs = _extract_model_inputs(
+            {
+                "input_ids": torch.tensor([[1, 2, 3]], dtype=torch.long),
+                "labels": torch.tensor([[-100, 1, 2]], dtype=torch.long),
+            }
+        )
+        self.assertEqual(set(model_inputs.keys()), {"input_ids"})
+
+        logits = torch.tensor(
+            [
+                [
+                    [0.0, 3.0, 0.0],
+                    [3.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        labels = torch.tensor([[-100, 1, 2]], dtype=torch.long)
+
+        loss, metrics = _compute_sft_loss(
+            logits,
+            labels,
+            profit_enabled=True,
+            profit_threshold=0.1,
+        )
+
+        self.assertTrue(torch.isfinite(loss))
+        self.assertEqual(metrics["valid_tokens"], 2.0)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,11 @@
+input_path: data/stage1_rsr_candidates.jsonl
+output_path: data/stage1_rsr_selected_train.jsonl
+report_path: data/stage1_rsr_selected_train.report.json
+
+seed: 42
+sample_size: 2000
+min_solution_tokens: 0
+max_solution_tokens:
+allowed_sources: [short, small, large]
+drop_truncated_trajectories: true
+prefer_lower_rsr: true

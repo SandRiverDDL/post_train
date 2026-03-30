@@ -220,7 +220,8 @@ class EvalPipelineTest(unittest.TestCase):
         cfg = load_eval_config("configs/eval/aime.yaml")
 
         self.assertEqual([task.name for task in cfg.tasks], ["aime24", "aime25"])
-        self.assertEqual(cfg.tasks[0].samples_per_problem, 4)
+        self.assertGreater(cfg.tasks[0].samples_per_problem, 0)
+        self.assertEqual(cfg.tasks[0].samples_per_problem, cfg.tasks[1].samples_per_problem)
         self.assertEqual(cfg.tasks[1].sampling_temperature, 0.6)
 
     def test_resolve_eval_tasks_filters_aime_tasks_from_combined_config(self) -> None:

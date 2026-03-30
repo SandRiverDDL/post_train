@@ -5,6 +5,7 @@ from pathlib import Path
 from .eval import EvalConfig, EvalTaskConfig
 from .io import load_yaml_config
 from .on_policy import OnPolicyDataConfig, OnPolicyLoopConfig
+from .stage1 import Stage1Math220kDataConfig, Stage1RSRCandidatesConfig, Stage1RSRSelectConfig
 from .sft import SFTTrainConfig
 from .simpo import SimPOConfig, SimPODataConfig
 from .stage2 import Stage2DataConfig, Stage2HendrycksLongDataConfig, Stage2MixLongDataConfig
@@ -12,6 +13,18 @@ from .stage2 import Stage2DataConfig, Stage2HendrycksLongDataConfig, Stage2MixLo
 
 def load_sft_config(path: str | Path) -> SFTTrainConfig:
     return SFTTrainConfig.model_validate(load_yaml_config(path))
+
+
+def load_stage1_math220k_data_config(path: str | Path) -> Stage1Math220kDataConfig:
+    return Stage1Math220kDataConfig.model_validate(load_yaml_config(path))
+
+
+def load_stage1_rsr_candidates_config(path: str | Path) -> Stage1RSRCandidatesConfig:
+    return Stage1RSRCandidatesConfig.model_validate(load_yaml_config(path))
+
+
+def load_stage1_rsr_select_config(path: str | Path) -> Stage1RSRSelectConfig:
+    return Stage1RSRSelectConfig.model_validate(load_yaml_config(path))
 
 
 def load_eval_config(path: str | Path) -> EvalConfig:
@@ -54,6 +67,9 @@ __all__ = [
     "SFTTrainConfig",
     "SimPOConfig",
     "SimPODataConfig",
+    "Stage1Math220kDataConfig",
+    "Stage1RSRCandidatesConfig",
+    "Stage1RSRSelectConfig",
     "Stage2DataConfig",
     "Stage2HendrycksLongDataConfig",
     "Stage2MixLongDataConfig",
@@ -61,6 +77,9 @@ __all__ = [
     "load_on_policy_data_config",
     "load_on_policy_loop_config",
     "load_sft_config",
+    "load_stage1_math220k_data_config",
+    "load_stage1_rsr_candidates_config",
+    "load_stage1_rsr_select_config",
     "load_simpo_config",
     "load_simpo_data_config",
     "load_stage2_data_config",
