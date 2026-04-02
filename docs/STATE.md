@@ -8,6 +8,8 @@
 
 - 代码主包：`src/post_train/`
 - 当前 on-policy 内部实现已收口到 `src/post_train/on_policy/` 子包；顶层 `on_policy_loop.py` 与 `on_policy_query_strategy.py` 仅保留兼容导出
+- 当前实验摘要统一落到 `outputs/*/run_summary.json`，实验索引统一追加到 `experiments/registry.jsonl`
+- 当前实验汇总表 `experiments/summary.md` 以 `math500/gsm8k` 的 `avg_rank` 为主排序；缺 benchmark 的旧实验会单独落到 `Incomplete Runs`
 - 薄入口：`prepare_stage1_data.py`、`prepare_eval_data.py`、`check_sft_data.py`、`train_sft.py`、`eval_model.py`、`prepare_on_policy_sft_data.py`、`run_on_policy_loop.py`、`prepare_simpo_data.py`、`train_simpo.py`
 - 配置目录：`configs/eval/`、`configs/on_policy/`、`configs/stage1/`、`configs/stage2/`、`configs/simpo/`
 - 当前开发模型：`Qwen/Qwen2.5-Math-1.5B`
@@ -18,6 +20,7 @@
 - 当前基础起点：`outputs/stage1_sft_5000/checkpoint-200`
 - 当前评测结果目录口径：`outputs/eval/<模型路径>/<task>/result.json` 与 `raw.json`
 - 暂停中的候选路线：`docs/experiments/two-stage-sft-simpo.md`
+- 新增独立实验路线：`GRPO`，当前仍未升级为仓库主线
 
 ## 当前最重要的问题
 
@@ -27,6 +30,7 @@
 4. 远程数据下载在当前环境里不稳定。
 5. 暂停路线仍保留在仓库里，文档与执行主线必须持续区分清楚。
 6. `stage1_mix_long` 作为独立实验线，仍需和当前 on-policy 主线分开解读，不自动视为新基线。
+7. `GRPO` 当前主要风险不是算法本身，而是目标机器上的 `TRL / vLLM / CUDA` 兼容性与显存预算。
 
 ## 当前优先级
 
@@ -46,6 +50,7 @@
 
 - 稳定规则看 `AGENTS.md`
 - 当前阶段设计看 `docs/SPEC.md`
+- 实验索引与自动汇总看 `docs/experiments/README.md`
 - 暂停路线看 `docs/experiments/two-stage-sft-simpo.md`
 - 结构分层看 `docs/ARCHITECTURE.md`
 - 当前状态看 `docs/STATE.md`

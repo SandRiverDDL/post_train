@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.config import load_on_policy_loop_config
+from post_train.experiments import register_on_policy_loop_run
 from post_train.on_policy_loop import run_on_policy_loop
 
 
@@ -26,9 +27,15 @@ def main() -> None:
     args = parse_args()
     cfg = load_on_policy_loop_config(args.config)
     result = run_on_policy_loop(cfg, resume=args.resume, overwrite=args.overwrite)
+    summary = register_on_policy_loop_run(
+        config_path=args.config,
+        loop_cfg=cfg,
+        final_summary=result["summary"],
+    )
     print(json.dumps(result["summary"], ensure_ascii=False, indent=2))
     print(f"wrote_history={result['history_path']}")
     print(f"wrote_final_summary={result['final_summary_path']}")
+    print(f"wrote_run_summary={summary['summary_path']}")
 
 
 if __name__ == "__main__":

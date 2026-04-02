@@ -1,0 +1,11 @@
+route,run_id,source,train_dataset,parent_run_id,dev_normalized_accuracy,math500_pass_at_1,gsm8k_pass_at_1,math500_rank,gsm8k_rank,avg_rank,complete_benchmarks,output_dir
+on_policy,outputs/on_policy_loop,discovered,unknown,stage1_sft_5000/checkpoint-200,0.7467,0.7000,0.8476,1,1,1.00,yes,outputs/on_policy_loop
+stage1,outputs/stage1_sft_5000,discovered,unknown,Qwen/Qwen2.5-Math-1.5B,0.7267,,,,,,no,outputs/stage1_sft_5000
+stage1,outputs/stage1_mix_long_sft,discovered,unknown,Qwen/Qwen2.5-Math-1.5B,0.7200,,,,,,no,outputs/stage1_mix_long_sft
+stage1,outputs/stage1_rsr_sft,discovered,unknown,Qwen/Qwen2.5-Math-1.5B,0.7133,,,,,,no,outputs/stage1_rsr_sft
+stage2,outputs/stage2_hendrycks_long_sft,discovered,unknown,Qwen/Qwen2.5-Math-1.5B,0.7133,,,,,,no,outputs/stage2_hendrycks_long_sft
+stage2,outputs/stage2_mix_long_sft,discovered,unknown,Qwen/Qwen2.5-Math-1.5B,0.7133,,,,,,no,outputs/stage2_mix_long_sft
+stage1,outputs/stage1_math220k_sft,discovered,unknown,Qwen/Qwen2.5-Math-1.5B,0.6933,,,,,,no,outputs/stage1_math220k_sft
+stage2,outputs/stage2_sft,discovered,unknown,Qwen/Qwen2.5-Math-1.5B,0.6667,,,,,,no,outputs/stage2_sft
+simpo,outputs/simpo,discovered,unknown,Qwen/Qwen2.5-Math-1.5B,0.4600,,,,,,no,outputs/simpo
+stage1,outputs/stage1_sft,discovered,unknown,Qwen/Qwen2.5-Math-1.5B,0.4533,,,,,,no,outputs/stage1_sft

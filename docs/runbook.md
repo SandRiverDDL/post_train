@@ -66,4 +66,6 @@
 - 当前主线优先看 `on_policy.md`，不要从暂停路线开始执行。
 - benchmark、`math500_dev200`、`AIME`、`math220k_dev` 统一通过 `scripts/prepare_eval_data.py` 准备。
 - 评测结果默认按模型路径和任务名分目录，不再平铺堆在 `outputs/eval/` 根目录。
+- 训练或 loop 结束后，可用 `scripts/collect_results.py` 自动汇总当前实验到 `experiments/summary.md`
+- `summary.md` 当前主表按 `math500/gsm8k` 的 `avg_rank` 升序；只有 benchmark 完整的实验进入 `Complete Runs`
 - 若文档与实现冲突，以 `AGENTS.md`、`SPEC.md`、`STATE.md` 为准，并优先修正文档。

@@ -79,6 +79,7 @@
 
 ```bash
 .venv/bin/python scripts/run_on_policy_loop.py --config configs/on_policy/loop_opsft.yaml
+.venv/bin/python scripts/collect_results.py
 ```
 
 继续未完成 run：
@@ -126,10 +127,12 @@
 
 - `outputs/on_policy_loop/history.json`
 - `outputs/on_policy_loop/final_summary.json`
+- `outputs/on_policy_loop/run_summary.json`
 - `outputs/on_policy_loop/round*/round_summary.json`
 - `outputs/on_policy_loop/round*/holdout_eval/<task>/result.json`
 - `outputs/on_policy_loop/round*/holdout_eval/<task>/raw.json`
 - `data/on_policy_loop/round*/`
+- `experiments/registry.jsonl`
 
 ## 手动循环建议
 

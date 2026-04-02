@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .eval import EvalConfig, EvalTaskConfig
+from .grpo import GRPODataConfig, GRPORewardConfig, GRPOTrainConfig
 from .io import load_yaml_config
 from .on_policy import OnPolicyDataConfig, OnPolicyLoopConfig
 from .stage1 import Stage1Math220kDataConfig, Stage1RSRCandidatesConfig, Stage1RSRSelectConfig
@@ -29,6 +30,18 @@ def load_stage1_rsr_select_config(path: str | Path) -> Stage1RSRSelectConfig:
 
 def load_eval_config(path: str | Path) -> EvalConfig:
     return EvalConfig.model_validate(load_yaml_config(path))
+
+
+def load_grpo_data_config(path: str | Path) -> GRPODataConfig:
+    return GRPODataConfig.model_validate(load_yaml_config(path))
+
+
+def load_grpo_reward_config(path: str | Path) -> GRPORewardConfig:
+    return GRPORewardConfig.model_validate(load_yaml_config(path))
+
+
+def load_grpo_train_config(path: str | Path) -> GRPOTrainConfig:
+    return GRPOTrainConfig.model_validate(load_yaml_config(path))
 
 
 def load_simpo_config(path: str | Path) -> SimPOConfig:
@@ -62,6 +75,9 @@ def load_stage2_hendrycks_long_data_config(path: str | Path) -> Stage2HendrycksL
 __all__ = [
     "EvalConfig",
     "EvalTaskConfig",
+    "GRPODataConfig",
+    "GRPORewardConfig",
+    "GRPOTrainConfig",
     "OnPolicyDataConfig",
     "OnPolicyLoopConfig",
     "SFTTrainConfig",
@@ -74,6 +90,9 @@ __all__ = [
     "Stage2HendrycksLongDataConfig",
     "Stage2MixLongDataConfig",
     "load_eval_config",
+    "load_grpo_data_config",
+    "load_grpo_reward_config",
+    "load_grpo_train_config",
     "load_on_policy_data_config",
     "load_on_policy_loop_config",
     "load_sft_config",

@@ -1,0 +1,9 @@
+rd211_dataset: rd211/Big-Math-RL-Verified-Filtered
+dataset_split: train
+solve_rate_lower: 0.25
+solve_rate_upper: 0.5
+anchor_dataset_path: data/on_policy_loop/query_strategy/candidate_pool.jsonl
+anchor_share: 0.3
+seed: 42
+output_path: data/grpo/train.jsonl
+report_path: data/grpo/train.report.json

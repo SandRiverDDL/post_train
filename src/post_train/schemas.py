@@ -25,6 +25,16 @@ class PreferenceRecord(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
+class GRPORecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    prompt: str
+    question: str
+    final_answer: str
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
 class EvalPrediction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

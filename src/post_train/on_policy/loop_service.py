@@ -280,6 +280,7 @@ def run_on_policy_loop(
         "best_round_index": best_round_index,
         "best_holdout_accuracy": best_holdout_accuracy,
         "best_model_path": best_model_path or "",
+        "stop_dataset": str(cfg.stop_dataset),
         "history_path": str(saved_history_path),
         "query_strategy": cfg.query_strategy,
         "query_strategy_state_path": (

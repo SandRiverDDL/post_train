@@ -1,0 +1,6 @@
+extends: train_cheap.yaml
+output_dir: outputs/grpo_4090
+num_generations: 8
+use_vllm: true
+vllm_mode: colocate
+vllm_gpu_memory_utilization: 0.25

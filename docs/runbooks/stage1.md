@@ -107,6 +107,7 @@ RSR 筛选后的 stage1 训练：
 
 ```bash
 .venv/bin/python scripts/train_sft.py --config configs/stage1/rsr_sft.yaml
+.venv/bin/python scripts/collect_results.py
 ```
 
 这条线使用独立配置：
@@ -134,3 +135,5 @@ RSR 筛选后的 stage1 训练：
 - `outputs/stage1_sft/dev_eval/best_checkpoint.json`
 - `outputs/stage1_sft/dev_eval/checkpoint-*/result.json`
 - `outputs/stage1_sft/dev_eval/checkpoint-*/raw.json`
+- `outputs/stage1_sft/run_summary.json`
+- `experiments/registry.jsonl`

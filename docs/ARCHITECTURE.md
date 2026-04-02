@@ -86,6 +86,19 @@
   - TRL `CPOTrainer(loss_type=simpo)` 封装
   - 4bit + PEFT 加载
   - checkpoint / resume 编排
+- `grpo.py`
+  - 独立实验路线模块
+  - TRL `GRPOTrainer` 封装
+  - preflight 检查、4bit + PEFT 加载
+  - 关键 wandb 指标白名单与平滑上报
+- `grpo_data.py`
+  - `rd211` 数学 RL 数据过滤
+  - 与 anchor 题池按比例混合
+  - 统一 exact dedup
+- `grpo_rewards.py`
+  - 正确性 reward
+  - parse 失败惩罚
+  - reward 组件装配
 - `simpo_data.py`
   - 暂停中的候选路线模块
   - query 池构造
@@ -214,6 +227,30 @@ query pool
 -> `TRL CPOTrainer(loss_type=simpo)`
 -> 模型导出
 -> `eval_model`
+
+### 5. GRPO（独立实验路线）
+
+输入：
+
+- `rd211` 过滤后的题目
+- 本地 anchor 题池
+- stage1 base / adapter 模型
+
+输出：
+
+- `GRPO` 训练 JSONL
+- `GRPO` 模型目录
+- `wandb` 关键训练指标
+
+流程：
+
+rd211 + anchor
+-> solve-rate 过滤
+-> exact dedup
+-> 按比例混合
+-> reward 组装
+-> `TRL GRPOTrainer`
+-> 模型导出
 
 ## 评测设计
 
