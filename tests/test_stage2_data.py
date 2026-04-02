@@ -31,7 +31,7 @@ class Stage2DataTest(unittest.TestCase):
             config_path.write_text(
                 "\n".join(
                     [
-                        "stage1_input: data/stage1_train.jsonl",
+                        "stage1_input: data/stage1/train.jsonl",
                         "tokenizer_name: /tmp/model",
                         "total_size: 10",
                         "stage1_random_quota: 2",

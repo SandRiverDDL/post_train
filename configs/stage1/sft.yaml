@@ -1,5 +1,5 @@
 model_name: /home/chy/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
-train_dataset: data/stage1_train.jsonl
+train_dataset: data/stage1/train.jsonl
 
 output_dir: outputs/stage1_sft
 seed: 42

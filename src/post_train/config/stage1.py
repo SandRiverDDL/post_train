@@ -10,8 +10,8 @@ class Stage1Math220kDataConfig(BaseModel):
 
     dataset_name: str = "qingy2024/OpenR1-Math-220k-Cleaned"
     dataset_split: str = "train"
-    output_path: Path = Path("data/stage1_math220k_train.jsonl")
-    report_path: Path = Path("data/stage1_math220k_train.report.json")
+    output_path: Path = Path("data/stage1/math220k/train.jsonl")
+    report_path: Path = Path("data/stage1/math220k/train.report.json")
     tokenizer_name: str
     seed: int = 42
     sample_size: int = Field(default=2000, ge=1)
@@ -39,9 +39,9 @@ class Stage1RSRCandidatesConfig(BaseModel):
     large_teacher_split: str = "train"
     student_model_name: str
     tokenizer_name: str | None = None
-    output_path: Path = Path("data/stage1_rsr_candidates.jsonl")
-    report_path: Path = Path("data/stage1_rsr_candidates.report.json")
-    unmatched_preview_path: Path = Path("data/stage1_rsr_candidates.unmatched.preview.jsonl")
+    output_path: Path = Path("data/stage1/rsr/candidates.jsonl")
+    report_path: Path = Path("data/stage1/rsr/candidates.report.json")
+    unmatched_preview_path: Path = Path("data/stage1/rsr/candidates.unmatched.preview.jsonl")
     seed: int = 42
     batch_size: int = Field(default=2, ge=1)
     max_seq_length: int = Field(default=1536, ge=8)
@@ -61,9 +61,9 @@ class Stage1RSRCandidatesConfig(BaseModel):
 class Stage1RSRSelectConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    input_path: Path = Path("data/stage1_rsr_candidates.jsonl")
-    output_path: Path = Path("data/stage1_rsr_selected_train.jsonl")
-    report_path: Path = Path("data/stage1_rsr_selected_train.report.json")
+    input_path: Path = Path("data/stage1/rsr/candidates.jsonl")
+    output_path: Path = Path("data/stage1/rsr/selected_train.jsonl")
+    report_path: Path = Path("data/stage1/rsr/selected_train.report.json")
     seed: int = 42
     sample_size: int = Field(default=2000, ge=1)
     min_solution_tokens: int = Field(default=0, ge=0)

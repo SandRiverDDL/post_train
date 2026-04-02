@@ -46,9 +46,9 @@ class SimPODataConfig(BaseModel):
     query_source: str = "UWNSL/MATH_training_split_short_cot"
     exclude_paths: list[Path] = Field(
         default_factory=lambda: [
-            Path("data/stage1_train.jsonl"),
-            Path("data/stage1_dev200.jsonl"),
-            Path("data/eval/global_dev_math500_150.jsonl"),
+            Path("data/stage1/train.jsonl"),
+            Path("data/stage1/dev200.jsonl"),
+            Path("data/eval/math500_dev200.jsonl"),
             Path("data/eval/gsm8k_test.jsonl"),
             Path("data/eval/math500_test.jsonl"),
         ]

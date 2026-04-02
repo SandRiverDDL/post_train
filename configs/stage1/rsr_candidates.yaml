@@ -10,9 +10,9 @@ large_teacher_split: train
 student_model_name: /home/chy/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
 tokenizer_name: /home/chy/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
 
-output_path: data/stage1_rsr_candidates.jsonl
-report_path: data/stage1_rsr_candidates.report.json
-unmatched_preview_path: data/stage1_rsr_candidates.unmatched.preview.jsonl
+output_path: data/stage1/rsr/candidates.jsonl
+report_path: data/stage1/rsr/candidates.report.json
+unmatched_preview_path: data/stage1/rsr/candidates.unmatched.preview.jsonl
 
 seed: 42
 batch_size: 4

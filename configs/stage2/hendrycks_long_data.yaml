@@ -1,4 +1,4 @@
-short_dataset_path: data/stage1_train_5000.jsonl
+short_dataset_path: data/stage1/train_5000.jsonl
 hendrycks_dataset: EleutherAI/hendrycks_math
 hendrycks_split: train
 hendrycks_config_name:
@@ -13,9 +13,9 @@ hendrycks_config_names:
 long_cot_dataset: UWNSL/MATH_training_split_long_cot
 long_cot_split: train
 long_cot_config_name:
-output_path: data/stage2_hendrycks_long_train.jsonl
-report_path: data/stage2_hendrycks_long_train.report.json
-unmatched_preview_path: data/stage2_hendrycks_long_unmatched.preview.jsonl
+output_path: data/stage2/hendrycks_long/train.jsonl
+report_path: data/stage2/hendrycks_long/train.report.json
+unmatched_preview_path: data/stage2/hendrycks_long/unmatched.preview.jsonl
 tokenizer_name: /home/chy/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
 seed: 42
 total_size: 2000

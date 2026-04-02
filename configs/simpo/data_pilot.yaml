@@ -2,9 +2,9 @@ query_dataset: UWNSL/MATH_training_split_short_cot
 query_split: train
 query_source: UWNSL/MATH_training_split_short_cot
 exclude_paths:
-  - data/stage1_train.jsonl
-  - data/stage1_dev200.jsonl
-  - data/eval/global_dev_math500_150.jsonl
+  - data/stage1/train.jsonl
+  - data/stage1/dev200.jsonl
+  - data/eval/math500_dev200.jsonl
   - data/eval/gsm8k_test.jsonl
   - data/eval/math500_test.jsonl
 

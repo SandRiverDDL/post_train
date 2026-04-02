@@ -2,6 +2,12 @@
 
 这份文档覆盖当前主线：单轮数据准备、单轮训练、单轮评测，以及自动循环。
 
+实现说明：
+
+- `scripts/run_on_policy_loop.py` 仍是唯一自动循环入口
+- 内部实现已经拆到 `src/post_train/on_policy/` 子包
+- 顶层 `on_policy_loop.py` 与 `on_policy_query_strategy.py` 现在只作为兼容导出层保留
+
 ## 单轮数据准备
 
 ```bash
@@ -11,7 +17,7 @@
 默认口径：
 
 - seed 模型：`outputs/stage1_sft_5000/checkpoint-200`
-- query registry：`data/stage1_train_5000.jsonl`
+- query registry：`data/stage1/train_5000.jsonl`
 - 语义：已见 5000 题上的 self-refine / instability mining
 - 单轮 prepare 默认 full-harvest 整个 registry
 - 每题采样 `4` 个 responses
@@ -34,12 +40,6 @@
 .venv/bin/python scripts/train_sft.py --config configs/on_policy/sft.yaml
 ```
 
-训练 `mixed_only_shortest`：
-
-```bash
-.venv/bin/python scripts/train_sft.py --config configs/on_policy/sft_mixed.yaml
-```
-
 按论文口径复现 `opSFT`：
 
 ```bash
@@ -59,15 +59,15 @@
 .venv/bin/python scripts/eval_model.py \
   --config configs/eval/default.yaml \
   --model outputs/on_policy_sft/round1 \
-  --dataset data/eval/global_dev_math500_150.jsonl \
+  --dataset data/eval/math500_dev200.jsonl \
   --batch-size 6 \
   --output outputs/eval
 ```
 
 默认结果目录示例：
 
-- `outputs/eval/on_policy_sft/round1/global_dev_math500_150/result.json`
-- `outputs/eval/on_policy_sft/round1/global_dev_math500_150/raw.json`
+- `outputs/eval/on_policy_sft/round1/math500_dev200/result.json`
+- `outputs/eval/on_policy_sft/round1/math500_dev200/raw.json`
 
 ## 自动循环
 
@@ -79,12 +79,6 @@
 
 ```bash
 .venv/bin/python scripts/run_on_policy_loop.py --config configs/on_policy/loop_opsft.yaml
-```
-
-按小池子迁移口径运行 `opSFT` loop：
-
-```bash
-.venv/bin/python scripts/run_on_policy_loop.py --config configs/on_policy/loop_opsft_smallpool.yaml
 ```
 
 继续未完成 run：
@@ -103,17 +97,17 @@
 
 - 从 `seed_model` 开始进入 round1
 - `loop.yaml` 是当前默认 on-policy 主线：`512 prompt / round`，`query_strategy=mixed_bootstrap_candidate`
-- `loop_opsft.yaml` 是“大池子论文口径线”：延续 bootstrap+candidate query 结构，但训练目标改成 `opsft`
-- `loop_opsft_smallpool.yaml` 是“5000 题小池子迁移线”：`320 prompt / round`、`8 rollouts / prompt`、`candidate:random = 50:50`
+- `loop_opsft.yaml` 是当前 `opSFT` 小池子迁移线：`640 prompt / round`、`8 rollouts / prompt`、`candidate:random = 50:50`
 - 当前主配置默认 `query_strategy=mixed_bootstrap_candidate`
 - `configs/on_policy/data_opsft.yaml` 会把 rollout `temperature` 固定到 `1.0`
-- `configs/on_policy/data_opsft_smallpool.yaml` 会把 rollout `temperature` 固定到 `1.0`，并把 `responses_per_query` 提到 `8`
-- `configs/on_policy/loop_opsft_smallpool.yaml` 还会开启 `advance_teacher_on_improvement_only=true`，未提升轮不推进 teacher
+- `configs/on_policy/data_opsft.yaml` 会把 rollout `temperature` 固定到 `1.0`，并把 `responses_per_query` 提到 `8`
+- `configs/on_policy/loop_opsft.yaml` 还会开启 `advance_teacher_on_improvement_only=true`，且只有 holdout 提升至少 `1%` 才推进 teacher
+- 当前 `opSFT` 线使用 `data/eval/math500_dev200.jsonl` 作为开发评测集；这份 dev 由 `HuggingFaceH4/MATH-500` 按 `level` 分层抽样生成
 - 每轮自动串起 `prepare -> train -> holdout eval`
 - bootstrap 池来自 `data/on_policy/raw_samples.round1.jsonl` 中的 `all_correct`
 - candidate 池默认是 `data/on_policy/candidate_pool.mixed_1000.jsonl`
 - 训练集默认不是直接用 primary retained，而是 `mixed_plus_anchor`
-- anchor 默认来自 `data/stage1_train_5000.jsonl` 的原始轨迹，目标占比 `25%`
+- anchor 默认来自 `data/stage1/train_5000.jsonl` 的原始轨迹，目标占比 `25%`
 - 每轮训练默认 `1 epoch`，并在轮内自动保存约 `3~4` 个 checkpoints
 - 每轮正式推进到下一轮的 teacher 是该轮 dev 上选出的 best checkpoint
 - 连续 `3` 轮没有更高的 holdout accuracy 就停止

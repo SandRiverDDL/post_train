@@ -1,14 +1,8 @@
+extends: _base.loop.yaml
 # 当前 on-policy 主实验入口。
 # 通常只需要改：seed_model、round_query_count、max_rounds。
-seed_model: outputs/stage1_sft_5000/checkpoint-200
 base_on_policy_data_config: configs/on_policy/data.yaml
 base_sft_config: configs/on_policy/sft.yaml
-eval_config: configs/eval/default.yaml
-
-# 早停评测集。
-stop_dataset: data/eval/global_dev_math500_150.jsonl
-max_rounds: 10
-round_query_count: 512
 
 # 当前实验策略：
 # 30% 从 round1 的 all_correct bootstrap 池抽，
@@ -20,19 +14,8 @@ bootstrap_ratio: 0.3
 candidate_ratio: 0.7
 candidate_freeze_all_correct_hits: 2
 
-# 训练集组装：
-# mixed_only_shortest 为主，再混入固定 stage1 anchor 轨迹。
-train_selector: mixed_plus_anchor
-anchor_dataset_path: data/stage1_train_5000.jsonl
-anchor_share: 0.25
 train_epochs: 1.0
 train_learning_rate: 5.0e-6
-checkpoint_selection_enabled: true
-checkpoint_target_count: 4
-checkpoint_save_total_limit: 4
-
-patience: 3
-min_delta: 0.0
 round_base_dir: outputs/on_policy_loop
 data_base_dir: data/on_policy_loop
 backend: vllm

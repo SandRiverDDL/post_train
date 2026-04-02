@@ -12,6 +12,7 @@ from post_train.data import (
     prepare_benchmark_artifact,
     make_sft_record,
     prepare_sampled_eval_artifact,
+    prepare_stratified_math500_dev_artifact,
     sample_rows,
     split_train_dev,
     summarize_sft_dataset,
@@ -72,6 +73,26 @@ class DataPipelineTest(unittest.TestCase):
         self.assertIn("question", rows[0])
         self.assertIn("final_answer", rows[0])
         self.assertEqual(rows[0]["meta"]["source"], "toy")
+
+    def test_prepare_stratified_math500_dev_artifact_preserves_level_ratio(self) -> None:
+        raw_rows = [
+            {"problem": "q1", "answer": "1", "level": 1},
+            {"problem": "q2", "answer": "2", "level": 1},
+            {"problem": "q3", "answer": "3", "level": 2},
+            {"problem": "q4", "answer": "4", "level": 2},
+            {"problem": "q5", "answer": "5", "level": 2},
+            {"problem": "q6", "answer": "6", "level": 3},
+        ]
+        with patch("post_train.data.load_dataset_rows", return_value=raw_rows):
+            rows, report = prepare_stratified_math500_dev_artifact(
+                sample_size=4,
+                seed=5,
+            )
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(report["level_distribution"], {1: 2, 2: 3, 3: 1})
+        self.assertEqual(report["selected_level_distribution"], {1: 1, 2: 2, 3: 1})
+        self.assertEqual({row["meta"]["source"] for row in rows}, {"math500"})
+        self.assertTrue(all("level" in row["meta"] for row in rows))
 
     def test_prepare_benchmark_artifact_supports_aime25_fields(self) -> None:
         raw_rows = [

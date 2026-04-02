@@ -11,8 +11,8 @@ class Stage2DataConfig(BaseModel):
     stage1_input: Path
     math220k_dataset: str = "qingy2024/OpenR1-Math-220k-Cleaned"
     math220k_split: str = "train"
-    output_path: Path = Path("data/stage2_train.jsonl")
-    report_path: Path = Path("data/stage2_train.report.json")
+    output_path: Path = Path("data/stage2/default/train.jsonl")
+    report_path: Path = Path("data/stage2/default/train.report.json")
     intermediate_dir: Path = Path("outputs/stage2_data")
     tokenizer_name: str
     seed: int = 42
@@ -47,8 +47,8 @@ class Stage2MixLongDataConfig(BaseModel):
 
     dataset_name: str = "UWNSL/Mix-Long_long_0.2_short_0.8"
     dataset_split: str = "train"
-    output_path: Path = Path("data/stage2_mix_long_train.jsonl")
-    report_path: Path = Path("data/stage2_mix_long_train.report.json")
+    output_path: Path = Path("data/stage2/mix_long/train.jsonl")
+    report_path: Path = Path("data/stage2/mix_long/train.report.json")
     tokenizer_name: str
     seed: int = 42
     max_solution_tokens: int = Field(default=2048, ge=1)
@@ -59,7 +59,7 @@ class Stage2MixLongDataConfig(BaseModel):
 class Stage2HendrycksLongDataConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    short_dataset_path: Path = Path("data/stage1_train_5000.jsonl")
+    short_dataset_path: Path = Path("data/stage1/train_5000.jsonl")
     hendrycks_dataset: str = "EleutherAI/hendrycks_math"
     hendrycks_split: str = "train"
     hendrycks_config_name: str | None = None
@@ -77,9 +77,9 @@ class Stage2HendrycksLongDataConfig(BaseModel):
     long_cot_dataset: str = "UWNSL/MATH_training_split_long_cot"
     long_cot_split: str = "train"
     long_cot_config_name: str | None = None
-    output_path: Path = Path("data/stage2_hendrycks_long_train.jsonl")
-    report_path: Path = Path("data/stage2_hendrycks_long_train.report.json")
-    unmatched_preview_path: Path = Path("data/stage2_hendrycks_long_unmatched.preview.jsonl")
+    output_path: Path = Path("data/stage2/hendrycks_long/train.jsonl")
+    report_path: Path = Path("data/stage2/hendrycks_long/train.report.json")
+    unmatched_preview_path: Path = Path("data/stage2/hendrycks_long/unmatched.preview.jsonl")
     tokenizer_name: str
     seed: int = 42
     total_size: int = Field(default=2000, ge=1)

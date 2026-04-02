@@ -158,18 +158,18 @@ class OnPolicyLoopTest(unittest.TestCase):
                     "epoch_offset_end": requested_count,
                 }
 
-            with patch("post_train.on_policy_loop.load_on_policy_data_config", return_value=data_cfg), \
-                patch("post_train.on_policy_loop.load_sft_config", return_value=load_sft_config("configs/on_policy/sft.yaml")), \
-                patch("post_train.on_policy_loop.load_eval_config"), \
-                patch("post_train.on_policy_loop.load_anchor_rows", return_value=[]), \
-                patch("post_train.on_policy_loop.build_query_sampler_state", return_value={"seed": 42, "pool_size": 0, "epoch_index": 0, "epoch_offset": 0, "epoch_rows": []}), \
-                patch("post_train.on_policy_loop.build_mixed_plus_anchor_dataset", return_value=(tmp_path / "data/round/train.composed.jsonl", {"train_selector": "mixed_plus_anchor", "mixed_count": 80, "anchor_target": 27, "anchor_count": 27, "train_sample_count": 107, "anchor_share": 0.25, "anchor_sampling": {}})), \
-                patch("post_train.on_policy_loop.load_query_candidates", return_value=(loop_queries, {"available_rows": 12})), \
-                patch("post_train.on_policy_loop.sample_round_queries", side_effect=fake_sample_round_queries), \
-                patch("post_train.on_policy_loop.prepare_on_policy_sft_dataset_from_queries", return_value=data_result), \
-                patch("post_train.on_policy_loop.train_sft") as mock_train, \
+            with patch("post_train.on_policy.loop_service.load_on_policy_data_config", return_value=data_cfg), \
+                patch("post_train.on_policy.loop_service.load_sft_config", return_value=load_sft_config("configs/on_policy/sft.yaml")), \
+                patch("post_train.on_policy.loop_service.load_eval_config"), \
+                patch("post_train.on_policy.loop_service.load_anchor_rows", return_value=[]), \
+                patch("post_train.on_policy.loop_service.build_query_sampler_state", return_value={"seed": 42, "pool_size": 0, "epoch_index": 0, "epoch_offset": 0, "epoch_rows": []}), \
+                patch("post_train.on_policy.loop_round.build_mixed_plus_anchor_dataset", return_value=(tmp_path / "data/round/train.composed.jsonl", {"train_selector": "mixed_plus_anchor", "mixed_count": 80, "anchor_target": 27, "anchor_count": 27, "train_sample_count": 107, "anchor_share": 0.25, "anchor_sampling": {}})), \
+                patch("post_train.on_policy.loop_service.load_query_candidates", return_value=(loop_queries, {"available_rows": 12})), \
+                patch("post_train.on_policy.loop_round.sample_round_queries", side_effect=fake_sample_round_queries), \
+                patch("post_train.on_policy.loop_service.prepare_on_policy_sft_dataset_from_queries", return_value=data_result), \
+                patch("post_train.on_policy.loop_round.train_sft") as mock_train, \
                 patch(
-                    "post_train.on_policy_loop.run_checkpoint_selection",
+                    "post_train.on_policy.loop_round.run_checkpoint_selection",
                     side_effect=lambda **kwargs: {
                         "best": {
                             "checkpoint_path": str(Path(kwargs["train_output_dir"]) / "checkpoint-16"),
@@ -203,12 +203,12 @@ class OnPolicyLoopTest(unittest.TestCase):
             data_cfg = load_on_policy_data_config("configs/on_policy/data.yaml")
             loop_queries = [{"id": f"q{i}", "question": f"Question {i}", "final_answer": str(i)} for i in range(6)]
 
-            with patch("post_train.on_policy_loop.load_on_policy_data_config", return_value=data_cfg), \
-                patch("post_train.on_policy_loop.load_sft_config"), \
-                patch("post_train.on_policy_loop.load_eval_config"), \
-                patch("post_train.on_policy_loop.load_query_candidates", return_value=(loop_queries, {"available_rows": 6})), \
+            with patch("post_train.on_policy.loop_service.load_on_policy_data_config", return_value=data_cfg), \
+                patch("post_train.on_policy.loop_service.load_sft_config"), \
+                patch("post_train.on_policy.loop_service.load_eval_config"), \
+                patch("post_train.on_policy.loop_service.load_query_candidates", return_value=(loop_queries, {"available_rows": 6})), \
                 patch(
-                    "post_train.on_policy_loop.prepare_on_policy_sft_dataset_from_queries",
+                    "post_train.on_policy.loop_service.prepare_on_policy_sft_dataset_from_queries",
                     side_effect=InsufficientRetainedSamplesError("retained 样本不足"),
                 ):
                 result = run_on_policy_loop(loop_cfg)
@@ -247,24 +247,24 @@ class OnPolicyLoopTest(unittest.TestCase):
             ]
 
             with patch(
-                "post_train.on_policy_loop.build_mixed_query_strategy",
+                "post_train.on_policy.loop_service.build_mixed_query_strategy",
                 return_value={
                     "state_path": tmp_path / "data/query_strategy/state.json",
                     "bootstrap_rows": [{"id": "b1"}],
                     "candidate_rows": [{"id": "c1"}],
                 },
             ), \
-                patch("post_train.on_policy_loop.load_on_policy_data_config", return_value=load_on_policy_data_config("configs/on_policy/data.yaml")), \
-                patch("post_train.on_policy_loop.load_sft_config", return_value=load_sft_config("configs/on_policy/sft.yaml")), \
-                patch("post_train.on_policy_loop.load_eval_config"), \
-                patch("post_train.on_policy_loop.load_anchor_rows", return_value=[]), \
-                patch("post_train.on_policy_loop.build_query_sampler_state", return_value={"seed": 42, "pool_size": 0, "epoch_index": 0, "epoch_offset": 0, "epoch_rows": []}), \
-                patch("post_train.on_policy_loop.build_mixed_plus_anchor_dataset", return_value=(tmp_path / "data/round/train.composed.jsonl", {"train_selector": "mixed_plus_anchor", "mixed_count": 5, "anchor_target": 2, "anchor_count": 2, "train_sample_count": 7, "anchor_share": 0.25, "anchor_sampling": {}})), \
-                patch("post_train.on_policy_loop.sample_mixed_round_queries", return_value=(mixed_round_rows, {"effective_query_count": 5, "source_mix": {"candidate_frozen_count": 1}})), \
-                patch("post_train.on_policy_loop.prepare_on_policy_sft_dataset_from_queries", return_value=data_result), \
-                patch("post_train.on_policy_loop.update_mixed_query_strategy", return_value={"candidate_newly_frozen": 1, "candidate_frozen_count": 2}), \
-                patch("post_train.on_policy_loop.train_sft") as mock_train, \
-                patch("post_train.on_policy_loop.run_checkpoint_selection", return_value={"best": {"checkpoint_path": str(tmp_path / "outputs/round1/checkpoint-16"), "global_step": 16, "metrics": {"normalized_accuracy": 0.8}, "result_path": str(tmp_path / "result.json"), "raw_result_path": str(tmp_path / "raw.json")}, "ranking_path": str(tmp_path / "ranking.json"), "best_path": str(tmp_path / "best.json")}):
+                patch("post_train.on_policy.loop_service.load_on_policy_data_config", return_value=load_on_policy_data_config("configs/on_policy/data.yaml")), \
+                patch("post_train.on_policy.loop_service.load_sft_config", return_value=load_sft_config("configs/on_policy/sft.yaml")), \
+                patch("post_train.on_policy.loop_service.load_eval_config"), \
+                patch("post_train.on_policy.loop_service.load_anchor_rows", return_value=[]), \
+                patch("post_train.on_policy.loop_service.build_query_sampler_state", return_value={"seed": 42, "pool_size": 0, "epoch_index": 0, "epoch_offset": 0, "epoch_rows": []}), \
+                patch("post_train.on_policy.loop_round.build_mixed_plus_anchor_dataset", return_value=(tmp_path / "data/round/train.composed.jsonl", {"train_selector": "mixed_plus_anchor", "mixed_count": 5, "anchor_target": 2, "anchor_count": 2, "train_sample_count": 7, "anchor_share": 0.25, "anchor_sampling": {}})), \
+                patch("post_train.on_policy.loop_round.sample_mixed_round_queries", return_value=(mixed_round_rows, {"effective_query_count": 5, "source_mix": {"candidate_frozen_count": 1}})), \
+                patch("post_train.on_policy.loop_service.prepare_on_policy_sft_dataset_from_queries", return_value=data_result), \
+                patch("post_train.on_policy.loop_round.update_mixed_query_strategy", return_value={"candidate_newly_frozen": 1, "candidate_frozen_count": 2}), \
+                patch("post_train.on_policy.loop_round.train_sft") as mock_train, \
+                patch("post_train.on_policy.loop_round.run_checkpoint_selection", return_value={"best": {"checkpoint_path": str(tmp_path / "outputs/round1/checkpoint-16"), "global_step": 16, "metrics": {"normalized_accuracy": 0.8}, "result_path": str(tmp_path / "result.json"), "raw_result_path": str(tmp_path / "raw.json")}, "ranking_path": str(tmp_path / "ranking.json"), "best_path": str(tmp_path / "best.json")}):
                 mock_train.side_effect = lambda cfg: Path(cfg.output_dir)
                 result = run_on_policy_loop(loop_cfg)
 
@@ -304,7 +304,7 @@ class OnPolicyLoopTest(unittest.TestCase):
             )
             history = {
                 "seed_model": "seed-model",
-                "stop_dataset": "data/eval/global_dev_math500_150.jsonl",
+                "stop_dataset": "data/eval/math500_dev200.jsonl",
                 "patience": 3,
                 "min_delta": 0.0,
                 "max_rounds": 2,
@@ -365,16 +365,16 @@ class OnPolicyLoopTest(unittest.TestCase):
                     "epoch_offset_end": 10,
                 }
 
-            with patch("post_train.on_policy_loop.load_on_policy_data_config", return_value=load_on_policy_data_config("configs/on_policy/data.yaml")), \
-                patch("post_train.on_policy_loop.load_sft_config", return_value=load_sft_config("configs/on_policy/sft.yaml")), \
-                patch("post_train.on_policy_loop.load_eval_config"), \
-                patch("post_train.on_policy_loop.load_anchor_rows", return_value=[]), \
-                patch("post_train.on_policy_loop.build_mixed_plus_anchor_dataset", return_value=(data_base_dir / "round2/train.composed.jsonl", {"train_selector": "mixed_plus_anchor", "mixed_count": 8, "anchor_target": 3, "anchor_count": 3, "train_sample_count": 11, "anchor_share": 0.25, "anchor_sampling": {}})), \
-                patch("post_train.on_policy_loop.load_query_candidates", return_value=(loop_queries, {"available_rows": 12})), \
-                patch("post_train.on_policy_loop.sample_round_queries", side_effect=fake_sample_round_queries), \
-                patch("post_train.on_policy_loop.prepare_on_policy_sft_dataset_from_queries", return_value=data_result), \
-                patch("post_train.on_policy_loop.train_sft") as mock_train, \
-                patch("post_train.on_policy_loop.run_checkpoint_selection", return_value={"best": {"checkpoint_path": str(round_base_dir / "round2/checkpoint-16"), "global_step": 16, "metrics": {"normalized_accuracy": 0.8}, "result_path": str(tmp_path / "result.json"), "raw_result_path": str(tmp_path / "raw.json")}, "ranking_path": str(tmp_path / "ranking.json"), "best_path": str(tmp_path / "best.json")}):
+            with patch("post_train.on_policy.loop_service.load_on_policy_data_config", return_value=load_on_policy_data_config("configs/on_policy/data.yaml")), \
+                patch("post_train.on_policy.loop_service.load_sft_config", return_value=load_sft_config("configs/on_policy/sft.yaml")), \
+                patch("post_train.on_policy.loop_service.load_eval_config"), \
+                patch("post_train.on_policy.loop_service.load_anchor_rows", return_value=[]), \
+                patch("post_train.on_policy.loop_round.build_mixed_plus_anchor_dataset", return_value=(data_base_dir / "round2/train.composed.jsonl", {"train_selector": "mixed_plus_anchor", "mixed_count": 8, "anchor_target": 3, "anchor_count": 3, "train_sample_count": 11, "anchor_share": 0.25, "anchor_sampling": {}})), \
+                patch("post_train.on_policy.loop_service.load_query_candidates", return_value=(loop_queries, {"available_rows": 12})), \
+                patch("post_train.on_policy.loop_round.sample_round_queries", side_effect=fake_sample_round_queries), \
+                patch("post_train.on_policy.loop_service.prepare_on_policy_sft_dataset_from_queries", return_value=data_result), \
+                patch("post_train.on_policy.loop_round.train_sft") as mock_train, \
+                patch("post_train.on_policy.loop_round.run_checkpoint_selection", return_value={"best": {"checkpoint_path": str(round_base_dir / "round2/checkpoint-16"), "global_step": 16, "metrics": {"normalized_accuracy": 0.8}, "result_path": str(tmp_path / "result.json"), "raw_result_path": str(tmp_path / "raw.json")}, "ranking_path": str(tmp_path / "ranking.json"), "best_path": str(tmp_path / "best.json")}):
                 mock_train.side_effect = lambda cfg: Path(cfg.output_dir)
                 result = run_on_policy_loop(loop_cfg, resume=True)
 
@@ -385,7 +385,7 @@ class OnPolicyLoopTest(unittest.TestCase):
     def test_run_on_policy_loop_can_hold_teacher_at_best_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
-            loop_cfg = load_on_policy_loop_config("configs/on_policy/loop_opsft_smallpool.yaml").model_copy(
+            loop_cfg = load_on_policy_loop_config("configs/on_policy/loop_opsft.yaml").model_copy(
                 update={
                     "round_base_dir": tmp_path / "outputs",
                     "data_base_dir": tmp_path / "data",
@@ -395,7 +395,7 @@ class OnPolicyLoopTest(unittest.TestCase):
                     "train_selector": "primary_retained",
                 }
             )
-            data_cfg = load_on_policy_data_config("configs/on_policy/data_opsft_smallpool.yaml")
+            data_cfg = load_on_policy_data_config("configs/on_policy/data_opsft.yaml")
             data_result = {
                 "retained_output_paths": {
                     "any_correct_shortest": str(tmp_path / "data/round/train.jsonl"),
@@ -411,17 +411,17 @@ class OnPolicyLoopTest(unittest.TestCase):
             ]
             holdout_scores = [0.70, 0.69, 0.68]
 
-            with patch("post_train.on_policy_loop.load_on_policy_data_config", return_value=data_cfg), \
-                patch("post_train.on_policy_loop.load_sft_config", return_value=load_sft_config("configs/on_policy/opsft.yaml")), \
-                patch("post_train.on_policy_loop.load_eval_config"), \
-                patch("post_train.on_policy_loop.load_query_candidates", return_value=(loop_queries, {"available_rows": 20})), \
-                patch("post_train.on_policy_loop.build_candidate_random_query_strategy", return_value={"state_path": tmp_path / "data/query_strategy/state.json", "candidate_rows": loop_queries[:5], "random_rows": loop_queries[5:]}), \
-                patch("post_train.on_policy_loop.sample_candidate_random_round_queries", return_value=(loop_queries[:4], {"effective_query_count": 4, "source_mix": {"candidate_sampled": 2, "random_sampled": 2}})), \
-                patch("post_train.on_policy_loop.persist_candidate_random_query_strategy_state"), \
-                patch("post_train.on_policy_loop.prepare_on_policy_sft_dataset_from_queries", return_value=data_result), \
-                patch("post_train.on_policy_loop.train_sft") as mock_train, \
+            with patch("post_train.on_policy.loop_service.load_on_policy_data_config", return_value=data_cfg), \
+                patch("post_train.on_policy.loop_service.load_sft_config", return_value=load_sft_config("configs/on_policy/opsft.yaml")), \
+                patch("post_train.on_policy.loop_service.load_eval_config"), \
+                patch("post_train.on_policy.loop_service.load_query_candidates", return_value=(loop_queries, {"available_rows": 20})), \
+                patch("post_train.on_policy.loop_service.build_candidate_random_query_strategy", return_value={"state_path": tmp_path / "data/query_strategy/state.json", "candidate_rows": loop_queries[:5], "random_rows": loop_queries[5:]}), \
+                patch("post_train.on_policy.loop_round.sample_candidate_random_round_queries", return_value=(loop_queries[:4], {"effective_query_count": 4, "source_mix": {"candidate_sampled": 2, "random_sampled": 2}})), \
+                patch("post_train.on_policy.loop_round.persist_candidate_random_query_strategy_state"), \
+                patch("post_train.on_policy.loop_service.prepare_on_policy_sft_dataset_from_queries", return_value=data_result), \
+                patch("post_train.on_policy.loop_round.train_sft") as mock_train, \
                 patch(
-                    "post_train.on_policy_loop.run_checkpoint_selection",
+                    "post_train.on_policy.loop_round.run_checkpoint_selection",
                     side_effect=lambda **kwargs: {
                         "best": {
                             "checkpoint_path": str(Path(kwargs["train_output_dir"]) / "checkpoint-8"),
@@ -483,12 +483,12 @@ class OnPolicyLoopTest(unittest.TestCase):
             data_cfg = load_on_policy_data_config("configs/on_policy/data.yaml")
             loop_queries = [{"id": f"q{i}", "question": f"Question {i}", "final_answer": str(i)} for i in range(6)]
 
-            with patch("post_train.on_policy_loop.load_on_policy_data_config", return_value=data_cfg), \
-                patch("post_train.on_policy_loop.load_sft_config"), \
-                patch("post_train.on_policy_loop.load_eval_config"), \
-                patch("post_train.on_policy_loop.load_query_candidates", return_value=(loop_queries, {"available_rows": 6})), \
+            with patch("post_train.on_policy.loop_service.load_on_policy_data_config", return_value=data_cfg), \
+                patch("post_train.on_policy.loop_service.load_sft_config"), \
+                patch("post_train.on_policy.loop_service.load_eval_config"), \
+                patch("post_train.on_policy.loop_service.load_query_candidates", return_value=(loop_queries, {"available_rows": 6})), \
                 patch(
-                    "post_train.on_policy_loop.prepare_on_policy_sft_dataset_from_queries",
+                    "post_train.on_policy.loop_service.prepare_on_policy_sft_dataset_from_queries",
                     side_effect=InsufficientRetainedSamplesError("retained 样本不足"),
                 ):
                 result = run_on_policy_loop(loop_cfg, overwrite=True)

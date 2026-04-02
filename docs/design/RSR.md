@@ -101,14 +101,14 @@
 
 第一步输出：
 
-- `data/stage1_rsr_candidates.jsonl`
-- `data/stage1_rsr_candidates.report.json`
-- `data/stage1_rsr_candidates.unmatched.preview.jsonl`
+- `data/stage1/rsr/candidates.jsonl`
+- `data/stage1/rsr/candidates.report.json`
+- `data/stage1/rsr/candidates.unmatched.preview.jsonl`
 
 第二步输出：
 
-- `data/stage1_rsr_selected_train.jsonl`
-- `data/stage1_rsr_selected_train.report.json`
+- `data/stage1/rsr/selected_train.jsonl`
+- `data/stage1/rsr/selected_train.report.json`
 
 最终筛选报告必须包含：
 

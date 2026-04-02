@@ -12,8 +12,8 @@
 
 默认输出：
 
-- `data/stage1_train.jsonl`
-- `data/stage1_dev200.jsonl`
+- `data/stage1/train.jsonl`
+- `data/stage1/dev200.jsonl`
 
 Mix-Long stage1 实验线：
 
@@ -58,10 +58,16 @@ RSR 默认规则：
 .venv/bin/python scripts/prepare_eval_data.py aime --year 25
 ```
 
+其中 `global-dev` 当前固定语义是：
+
+- 从 `HuggingFaceH4/MATH-500` 重新取数
+- 按原始 `level` 字段做 `dev200` 分层抽样
+- 默认输出 `data/eval/math500_dev200.jsonl`
+
 ## 检查 SFT 数据
 
 ```bash
-.venv/bin/python scripts/check_sft_data.py --input data/stage1_train.jsonl
+.venv/bin/python scripts/check_sft_data.py --input data/stage1/train.jsonl
 ```
 
 期望至少满足：
@@ -105,7 +111,7 @@ RSR 筛选后的 stage1 训练：
 
 这条线使用独立配置：
 
-- `train_dataset = data/stage1_rsr_selected_train.jsonl`
+- `train_dataset = data/stage1/rsr/selected_train.jsonl`
 - `output_dir = outputs/stage1_rsr_sft`
 
 这条线的默认差异：
@@ -118,7 +124,7 @@ RSR 筛选后的 stage1 训练：
 .venv/bin/python scripts/select_sft_checkpoint.py \
   --eval-config configs/eval/default.yaml \
   --train-output-dir outputs/stage1_sft \
-  --dataset data/eval/global_dev_math500_150.jsonl \
+  --dataset data/eval/math500_dev200.jsonl \
   --batch-size 6
 ```
 

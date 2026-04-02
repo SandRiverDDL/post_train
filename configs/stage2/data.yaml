@@ -1,8 +1,8 @@
-stage1_input: data/stage1_train.jsonl
+stage1_input: data/stage1/train.jsonl
 math220k_dataset: qingy2024/OpenR1-Math-220k-Cleaned
 math220k_split: train
-output_path: data/stage2_train.jsonl
-report_path: data/stage2_train.report.json
+output_path: data/stage2/default/train.jsonl
+report_path: data/stage2/default/train.report.json
 intermediate_dir: outputs/stage2_data
 tokenizer_name: /home/chy/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
 seed: 42

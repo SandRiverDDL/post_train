@@ -20,7 +20,7 @@ class SFTSelectionTest(unittest.TestCase):
                 "\n".join(
                     [
                         "model_name: /tmp/model",
-                        "train_dataset: data/stage1_train.jsonl",
+                        "train_dataset: data/stage1/train.jsonl",
                         "output_dir: outputs/stage1_sft",
                         "epochs: 2",
                         "loss_mode: opsft",
@@ -43,7 +43,7 @@ class SFTSelectionTest(unittest.TestCase):
                 "\n".join(
                     [
                         "model_name: /tmp/model",
-                        "train_dataset: data/stage1_train.jsonl",
+                        "train_dataset: data/stage1/train.jsonl",
                         "output_dir: outputs/stage1_sft",
                         "epochs: 1",
                         "loss_mode: opsft",

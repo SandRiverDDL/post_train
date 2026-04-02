@@ -28,7 +28,7 @@
 - 定义为“从当前模型出发生成新样本，再经过筛选后继续做 SFT”。
 - 当前首版口径：
   - seed 模型固定为 `outputs/stage1_sft_5000/checkpoint-200`
-  - query registry 固定为 `data/stage1_train_5000.jsonl`
+  - query registry 固定为 `data/stage1/train_5000.jsonl`
   - 当前语义是“seed 模型已见 5000 题上的 self-refine / instability mining”，不是未见题 pure on-policy
   - 当前不使用 `OpenR1-Math-220k-Cleaned` 或其他 `math220k` 数据做 on-policy query 或 retained 训练数据
   - 默认排除 `stage1_dev200_5000` 与各类 eval/dev 集
@@ -43,7 +43,7 @@
   - 两套 retained 都要求：`parse_success=True`、`is_correct=True`、`completion_len<=512`
   - 每题最多保留 `1` 条，若多条满足则保留最短正确回答
   - 继续复用现有 `train_sft.py` / `eval_model.py`
-  - 支持自动循环脚本：每轮直接使用该轮最终模型进入下一轮，轮间用 `global_dev_math500_150` 上的 `normalized_accuracy` 做早停
+  - 支持自动循环脚本：每轮直接使用该轮最终模型进入下一轮，轮间用 `math500_dev200` 上的 `normalized_accuracy` 做早停
   - 自动循环的 query 采样按 epoch 洗牌消费：先无放回扫完整个 query 池，耗尽后重洗继续
   - 当前默认早停口径：`patience=3`、`min_delta=0.0`
 - 当前首版边界：

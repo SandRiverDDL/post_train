@@ -57,10 +57,12 @@
   - 单轮多 response 采样
   - retained SFT 数据导出
   - retained 报告统计
-- `on_policy_loop.py`
-  - 多轮 on-policy 编排
-  - 轮间 holdout early stop
-  - round history 与 final summary
+- `on_policy/`
+  - `loop_service`：多轮 on-policy 编排主入口
+  - `loop_state`：resume / overwrite / history / final summary
+  - `loop_round`：单轮 prepare / train / holdout / teacher 推进
+  - `loop_paths`：round 路径与 round config 构造
+  - `strategy_*`：uniform / mixed / candidate-random 三类 query strategy
 - `stage2_data.py`
   - 暂停中的候选路线模块
   - source-specific filters
@@ -127,7 +129,7 @@
 说明：
 
 - `prepare_stage1_data.py` 当前只负责生成 `stage1_train` 与冻结 `dev`
-- `gsm8k`、`math500`、`global_dev`、`AIME`、`math220k_dev` 统一通过 `prepare_eval_data.py` 准备
+- `gsm8k`、`math500`、`math500_dev200`、`AIME`、`math220k_dev` 统一通过 `prepare_eval_data.py` 准备
 
 ### 2. on-policy SFT（当前主线）
 
@@ -148,9 +150,9 @@
 - 当前也支持单脚本自动循环：
   - prepare -> train -> holdout eval
   - 每轮直接用该轮最终模型继续
-  - 轮间用 `global_dev_math500_150` 做 early stop
+  - 轮间用 `math500_dev200` 做 early stop
 - 当前默认 seed 模型为 `outputs/stage1_sft_5000/checkpoint-200`
-- query registry 默认来自 `data/stage1_train_5000.jsonl`
+- query registry 默认来自 `data/stage1/train_5000.jsonl`
 - 当前默认语义是已见 5000 题上的 self-refine，不是未见题 pure on-policy
 - query 默认排除 `stage1_dev200_5000` 与 eval/dev
 - 当前 on-policy 主线不混入 `OpenR1-Math-220k-Cleaned` / `math220k` 数据

@@ -12,10 +12,10 @@ sys.path.insert(0, str(ROOT / "src"))
 from post_train.aime_eval import prepare_aime_eval_artifact, write_aime_eval_artifact
 from post_train.data import (
     prepare_benchmark_artifact,
-    prepare_sampled_eval_artifact,
+    prepare_stratified_math500_dev_artifact,
     preview_rows,
 )
-from post_train.io import write_jsonl
+from post_train.io import ensure_parent, write_jsonl
 from post_train.math220k_dev import (
     DATASET_NAME,
     DEFAULT_TOKENIZER_NAME,
@@ -35,15 +35,12 @@ def parse_args() -> argparse.Namespace:
     benchmarks.add_argument("--gsm8k-output", default="data/eval/gsm8k_test.jsonl", help="GSM8K 输出")
     benchmarks.add_argument("--math500-output", default="data/eval/math500_test.jsonl", help="MATH-500 输出")
 
-    global_dev = subparsers.add_parser("global-dev", help="从评测数据集中随机抽样生成全局 dev 集")
-    global_dev.add_argument("--dataset-name", default="HuggingFaceH4/MATH-500", help="数据集名")
-    global_dev.add_argument("--config-name", default=None, help="数据集 config 名")
-    global_dev.add_argument("--split", default="test", help="数据集 split")
-    global_dev.add_argument("--source", default="math500", help="输出记录 source 字段")
-    global_dev.add_argument("--sample-size", type=int, default=150, help="随机抽样条数")
+    global_dev = subparsers.add_parser("global-dev", help="从 HuggingFaceH4/MATH-500 按 level 分层生成 dev 集")
+    global_dev.add_argument("--sample-size", type=int, default=200, help="分层抽样条数")
     global_dev.add_argument("--seed", type=int, default=42, help="随机种子")
     global_dev.add_argument("--cache-dir", default=None, help="datasets cache 目录")
-    global_dev.add_argument("--output", default="data/eval/global_dev_math500_150.jsonl", help="输出 JSONL 路径")
+    global_dev.add_argument("--output", default="data/eval/math500_dev200.jsonl", help="输出 JSONL 路径")
+    global_dev.add_argument("--report-output", default="data/eval/math500_dev200.report.json", help="输出 report 路径")
 
     aime = subparsers.add_parser("aime", help="准备 AIME 本地评测数据")
     aime.add_argument("--year", type=int, required=True, choices=(24, 25), help="AIME 年份")
@@ -88,23 +85,24 @@ def _prepare_benchmarks(args: argparse.Namespace) -> None:
 
 
 def _prepare_global_dev(args: argparse.Namespace) -> None:
-    rows = prepare_sampled_eval_artifact(
-        dataset_name=args.dataset_name,
-        config_name=args.config_name,
-        split=args.split,
-        source=args.source,
+    rows, report = prepare_stratified_math500_dev_artifact(
         sample_size=args.sample_size,
         seed=args.seed,
         cache_dir=args.cache_dir,
     )
     write_jsonl(args.output, rows)
+    ensure_parent(args.report_output).write_text(
+        json.dumps(report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     print("global_dev_preview")
     print(preview_rows(rows))
-    print(f"dataset={args.dataset_name}")
-    print(f"split={args.split}")
+    print("dataset=HuggingFaceH4/MATH-500")
+    print("split=test")
     print(f"sample_size={args.sample_size}")
     print(f"seed={args.seed}")
     print(f"wrote_global_dev={args.output}")
+    print(f"wrote_global_dev_report={args.report_output}")
 
 
 def _prepare_aime(args: argparse.Namespace) -> None:

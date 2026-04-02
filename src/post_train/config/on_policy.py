@@ -17,8 +17,8 @@ class OnPolicyDataConfig(BaseModel):
     query_source: str = "UWNSL/MATH_training_split_short_cot"
     exclude_paths: list[Path] = Field(
         default_factory=lambda: [
-            Path("data/stage1_dev200_5000.jsonl"),
-            Path("data/eval/global_dev_math500_150.jsonl"),
+            Path("data/stage1/dev200_5000.jsonl"),
+            Path("data/eval/math500_dev200.jsonl"),
             Path("data/eval/gsm8k_test.jsonl"),
             Path("data/eval/math500_test.jsonl"),
         ]
@@ -62,7 +62,7 @@ class OnPolicyLoopConfig(BaseModel):
     base_on_policy_data_config: Path = Path("configs/on_policy/data.yaml")
     base_sft_config: Path = Path("configs/on_policy/sft.yaml")
     eval_config: Path = Path("configs/eval/default.yaml")
-    stop_dataset: Path = Path("data/eval/global_dev_math500_150.jsonl")
+    stop_dataset: Path = Path("data/eval/math500_dev200.jsonl")
     max_rounds: int = Field(default=10, ge=1)
     round_query_count: int = Field(default=512, ge=1)
     query_strategy: Literal["uniform_epoch", "mixed_bootstrap_candidate", "candidate_random_mix"] = "uniform_epoch"
@@ -73,7 +73,7 @@ class OnPolicyLoopConfig(BaseModel):
     random_ratio: float = Field(default=0.3, ge=0.0, le=1.0)
     candidate_freeze_all_correct_hits: int = Field(default=2, ge=1)
     train_selector: Literal["primary_retained", "mixed_plus_anchor"] = "mixed_plus_anchor"
-    anchor_dataset_path: Path | None = Path("data/stage1_train_5000.jsonl")
+    anchor_dataset_path: Path | None = Path("data/stage1/train_5000.jsonl")
     anchor_share: float = Field(default=0.25, gt=0.0, lt=1.0)
     train_epochs: float = Field(default=1.0, gt=0.0)
     train_learning_rate: float = Field(default=5.0e-6, gt=0.0)

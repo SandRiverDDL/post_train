@@ -34,8 +34,8 @@ class PrepareScriptsTest(unittest.TestCase):
                 module.main()
 
         self.assertEqual(mock_write.call_count, 2)
-        self.assertEqual(mock_write.call_args_list[0].args[0], "data/stage1_train.jsonl")
-        self.assertEqual(mock_write.call_args_list[1].args[0], "data/stage1_dev200.jsonl")
+        self.assertEqual(mock_write.call_args_list[0].args[0], "data/stage1/train.jsonl")
+        self.assertEqual(mock_write.call_args_list[1].args[0], "data/stage1/dev200.jsonl")
 
     def test_prepare_eval_data_benchmarks_writes_gsm8k_and_math500(self) -> None:
         module = load_script_module("prepare_eval_data.py")
@@ -50,6 +50,27 @@ class PrepareScriptsTest(unittest.TestCase):
         self.assertEqual(mock_prepare.call_args_list[1].kwargs["dataset_name"], "HuggingFaceH4/MATH-500")
         self.assertEqual(mock_write.call_args_list[0].args[0], "data/eval/gsm8k_test.jsonl")
         self.assertEqual(mock_write.call_args_list[1].args[0], "data/eval/math500_test.jsonl")
+
+    def test_prepare_eval_data_global_dev_writes_stratified_math500_dev_and_report(self) -> None:
+        module = load_script_module("prepare_eval_data.py")
+
+        with patch.object(
+            module,
+            "prepare_stratified_math500_dev_artifact",
+            return_value=([{"id": "m1", "meta": {"source": "math500", "level": 1}}], {"sample_size": 200}),
+        ) as mock_prepare, patch.object(module, "write_jsonl") as mock_write, patch(
+            "pathlib.Path.write_text"
+        ) as mock_report_write, patch.object(
+            sys,
+            "argv",
+            ["prepare_eval_data.py", "global-dev"],
+        ):
+            with redirect_stdout(io.StringIO()):
+                module.main()
+
+        self.assertEqual(mock_prepare.call_args.kwargs["sample_size"], 200)
+        self.assertEqual(mock_write.call_args_list[0].args[0], "data/eval/math500_dev200.jsonl")
+        self.assertTrue(mock_report_write.called)
 
     def test_prepare_eval_data_aime_routes_year_argument(self) -> None:
         module = load_script_module("prepare_eval_data.py")

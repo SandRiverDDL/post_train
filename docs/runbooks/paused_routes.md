@@ -12,8 +12,8 @@
 
 默认产物：
 
-- `data/stage2_train.jsonl`
-- `data/stage2_train.report.json`
+- `data/stage2/default/train.jsonl`
+- `data/stage2/default/train.report.json`
 
 当前 MVP 规则：
 

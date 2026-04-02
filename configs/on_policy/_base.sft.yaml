@@ -1,6 +1,5 @@
 model_name: outputs/stage1_sft_5000/checkpoint-200
-train_dataset: data/on_policy/train.round1.mixed_only_shortest.jsonl
-output_dir: outputs/on_policy_sft/round1_mixed_only
+train_dataset: data/on_policy/train.round1.jsonl
 seed: 42
 max_seq_length: 1536
 learning_rate: 1.0e-5

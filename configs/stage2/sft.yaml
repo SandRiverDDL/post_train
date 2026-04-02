@@ -1,5 +1,5 @@
 model_name: outputs/stage1_sft/checkpoint-50
-train_dataset: data/stage2_train.jsonl
+train_dataset: data/stage2/default/train.jsonl
 output_dir: outputs/stage2_sft
 seed: 42
 max_seq_length: 2048

@@ -1,5 +1,5 @@
 model_name: outputs/stage1_mix_long_sft/checkpoint-300
-train_dataset: data/stage2_hendrycks_long_train.jsonl
+train_dataset: data/stage2/hendrycks_long/train.jsonl
 output_dir: outputs/stage2_hendrycks_long_sft
 seed: 42
 max_seq_length: 3072

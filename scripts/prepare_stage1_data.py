@@ -20,8 +20,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dev-size", type=int, default=200, help="冻结 dev 样本数")
     parser.add_argument("--seed", type=int, default=42, help="随机种子")
     parser.add_argument("--cache-dir", default=None, help="datasets cache 目录")
-    parser.add_argument("--train-output", default="data/stage1_train.jsonl", help="stage1 训练集输出")
-    parser.add_argument("--dev-output", default="data/stage1_dev200.jsonl", help="stage1 dev 输出")
+    parser.add_argument("--train-output", default="data/stage1/train.jsonl", help="stage1 训练集输出")
+    parser.add_argument("--dev-output", default="data/stage1/dev200.jsonl", help="stage1 dev 输出")
     return parser.parse_args()
 
 

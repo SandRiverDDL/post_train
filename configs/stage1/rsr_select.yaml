@@ -1,6 +1,6 @@
-input_path: data/stage1_rsr_candidates.jsonl
-output_path: data/stage1_rsr_selected_train.jsonl
-report_path: data/stage1_rsr_selected_train.report.json
+input_path: data/stage1/rsr/candidates.jsonl
+output_path: data/stage1/rsr/selected_train.jsonl
+report_path: data/stage1/rsr/selected_train.report.json
 
 seed: 42
 sample_size: 2000

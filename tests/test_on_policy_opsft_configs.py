@@ -26,15 +26,13 @@ class OnPolicyOpSFTConfigTest(unittest.TestCase):
         cfg = load_on_policy_loop_config(ROOT / "configs/on_policy/loop_opsft.yaml")
         self.assertEqual(cfg.base_on_policy_data_config, Path("configs/on_policy/data_opsft.yaml"))
         self.assertEqual(cfg.base_sft_config, Path("configs/on_policy/opsft.yaml"))
-        self.assertEqual(cfg.train_learning_rate, 5.0e-7)
-
-    def test_on_policy_opsft_smallpool_loop_config_loads(self) -> None:
-        cfg = load_on_policy_loop_config(ROOT / "configs/on_policy/loop_opsft_smallpool.yaml")
-        self.assertEqual(cfg.base_on_policy_data_config, Path("configs/on_policy/data_opsft_smallpool.yaml"))
+        self.assertEqual(cfg.train_learning_rate, 1.0e-6)
         self.assertEqual(cfg.query_strategy, "candidate_random_mix")
-        self.assertEqual(cfg.round_query_count, 320)
+        self.assertEqual(cfg.round_query_count, 640)
         self.assertEqual(cfg.candidate_ratio, 0.5)
         self.assertEqual(cfg.random_ratio, 0.5)
+        self.assertEqual(cfg.stop_dataset, Path("data/eval/math500_dev200.jsonl"))
+        self.assertEqual(cfg.min_delta, 0.01)
         self.assertTrue(cfg.advance_teacher_on_improvement_only)
 
 

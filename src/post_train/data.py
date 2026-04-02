@@ -109,6 +109,49 @@ def make_eval_record(row: dict[str, Any], index: int, *, source: str) -> dict[st
     }
 
 
+def _extract_level(value: Any) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        match = re.search(r"(\d+)", value)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _allocate_stratified_targets(
+    counts_by_level: dict[int, int],
+    *,
+    sample_size: int,
+) -> dict[int, int]:
+    total = sum(counts_by_level.values())
+    if sample_size > total:
+        raise ValueError(f"样本不足：需要 {sample_size} 条，实际只有 {total} 条。")
+    if total == 0:
+        raise ValueError("没有可用于分层抽样的 level 样本。")
+
+    raw_targets: dict[int, float] = {
+        level: sample_size * count / total
+        for level, count in counts_by_level.items()
+    }
+    targets: dict[int, int] = {level: int(raw_target) for level, raw_target in raw_targets.items()}
+    assigned = sum(targets.values())
+    remainders = sorted(
+        (
+            (raw_targets[level] - targets[level], level)
+            for level in counts_by_level
+        ),
+        reverse=True,
+    )
+    remaining = sample_size - assigned
+    for _, level in remainders:
+        if remaining <= 0:
+            break
+        targets[level] += 1
+        remaining -= 1
+    return targets
+
+
 def split_train_dev(
     rows: Iterable[dict[str, Any]],
     *,
@@ -236,6 +279,60 @@ def prepare_sampled_eval_artifact(
         cache_dir=cache_dir,
     )
     return sample_rows(rows, sample_size=sample_size, seed=seed)
+
+
+def prepare_stratified_math500_dev_artifact(
+    *,
+    sample_size: int,
+    seed: int,
+    cache_dir: str | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    dataset_name = "HuggingFaceH4/MATH-500"
+    rows = load_dataset_rows(dataset_name, split="test", cache_dir=cache_dir)
+
+    rows_by_level: dict[int, list[dict[str, Any]]] = {}
+    for index, row in enumerate(rows):
+        level = _extract_level(row.get("level"))
+        if level is None:
+            continue
+        record = make_eval_record(row, index, source="math500")
+        record["meta"] = dict(record.get("meta", {}))
+        record["meta"]["level"] = level
+        rows_by_level.setdefault(level, []).append(record)
+
+    counts_by_level = {
+        level: len(level_rows)
+        for level, level_rows in sorted(rows_by_level.items())
+    }
+    targets_by_level = _allocate_stratified_targets(
+        counts_by_level,
+        sample_size=sample_size,
+    )
+
+    sampled_rows: list[dict[str, Any]] = []
+    selected_counts: dict[int, int] = {}
+    for offset, level in enumerate(sorted(targets_by_level)):
+        target = targets_by_level[level]
+        sampled = sample_rows(
+            rows_by_level[level],
+            sample_size=target,
+            seed=seed + offset,
+        )
+        sampled_rows.extend(sampled)
+        selected_counts[level] = len(sampled)
+
+    random.Random(seed).shuffle(sampled_rows)
+    report = {
+        "dataset_name": dataset_name,
+        "split": "test",
+        "sample_size": sample_size,
+        "seed": seed,
+        "raw_rows": len(rows),
+        "level_rows": sum(counts_by_level.values()),
+        "level_distribution": counts_by_level,
+        "selected_level_distribution": selected_counts,
+    }
+    return sampled_rows, report
 
 
 def preview_rows(rows: Iterable[dict[str, Any]], *, count: int = 3) -> str:

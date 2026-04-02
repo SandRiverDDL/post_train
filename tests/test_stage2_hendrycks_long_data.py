@@ -28,7 +28,7 @@ class Stage2HendrycksLongDataTest(unittest.TestCase):
         self.assertEqual(data_cfg.max_solution_tokens, 4096)
         self.assertEqual(len(data_cfg.hendrycks_config_names), 7)
         self.assertEqual(sft_cfg.model_name, "outputs/stage1_mix_long_sft/checkpoint-300")
-        self.assertEqual(sft_cfg.train_dataset, Path("data/stage2_hendrycks_long_train.jsonl"))
+        self.assertEqual(sft_cfg.train_dataset, Path("data/stage2/hendrycks_long/train.jsonl"))
 
     def test_prepare_stage2_hendrycks_long_dataset_matches_and_builds_ratio(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

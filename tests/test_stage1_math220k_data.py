@@ -142,7 +142,7 @@ class Stage1Math220kDataTest(unittest.TestCase):
         self.assertGreater(data_cfg.max_solution_tokens, data_cfg.min_solution_tokens)
 
         sft_cfg = load_sft_config(ROOT / "configs/stage1/math220k_sft.yaml")
-        self.assertEqual(sft_cfg.train_dataset, Path("data/stage1_math220k_train.jsonl"))
+        self.assertEqual(sft_cfg.train_dataset, Path("data/stage1/math220k/train.jsonl"))
         self.assertEqual(sft_cfg.output_dir, Path("outputs/stage1_math220k_sft"))
         self.assertFalse(sft_cfg.profit_enabled)
 

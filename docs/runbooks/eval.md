@@ -29,11 +29,16 @@
 .venv/bin/python scripts/eval_model.py \
   --config configs/eval/default.yaml \
   --model outputs/stage1_sft/checkpoint-50 \
-  --dataset data/eval/global_dev_math500_150.jsonl \
+  --dataset data/eval/math500_dev200.jsonl \
   --batch-size 6 \
   --max-lora-rank 32 \
   --output outputs/eval
 ```
+
+当前主线开发集：
+
+- `data/eval/math500_dev200.jsonl`
+- 由 `scripts/prepare_eval_data.py global-dev` 从 `HuggingFaceH4/MATH-500` 按 `level` 分层抽样生成
 
 ## AIME 评测
 
