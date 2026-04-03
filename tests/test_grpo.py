@@ -11,9 +11,29 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.config import load_grpo_data_config, load_grpo_reward_config, load_grpo_train_config
-from post_train.grpo import _aligned_compute_dtype, build_training_args, preflight_check
+from post_train.grpo import (
+    _aligned_compute_dtype,
+    _resolve_train_compute_dtype,
+    WandbSmoothingCallback,
+    assert_generation_dtype_ready,
+    align_output_head_dtypes,
+    build_training_args,
+    collect_model_dtype_report,
+    preflight_check,
+)
 from post_train.grpo_data import build_grpo_dataset, load_grpo_dataset
+from post_train.grpo_data import select_grpo_train_subset
 from post_train.grpo_rewards import build_reward_functions
+
+
+def _write_tmp_grpo_jsonl(rows: list[dict]) -> Path:
+    tmp_dir = tempfile.TemporaryDirectory()
+    path = Path(tmp_dir.name) / "train.jsonl"
+    path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
+    if not hasattr(_write_tmp_grpo_jsonl, "_tmp_dirs"):
+        _write_tmp_grpo_jsonl._tmp_dirs = []
+    _write_tmp_grpo_jsonl._tmp_dirs.append(tmp_dir)
+    return path
 
 
 class GRPOConfigTest(unittest.TestCase):
@@ -34,8 +54,14 @@ class GRPOConfigTest(unittest.TestCase):
 
         self.assertEqual(cfg.loss_type, "dr_grpo")
         self.assertEqual(cfg.num_generations, 4)
-        self.assertFalse(cfg.use_vllm)
         self.assertEqual(cfg.report_to, "wandb")
+        self.assertFalse(cfg.load_in_4bit)
+        self.assertEqual(cfg.max_train_samples, 500)
+        self.assertEqual(cfg.train_subset_seed, 42)
+        self.assertEqual(cfg.train_subset_mode, "fixed_random")
+        self.assertEqual(cfg.compute_dtype, "bfloat16")
+        self.assertTrue(cfg.mask_truncated_completions)
+        self.assertFalse(cfg.wandb_debug_metrics)
 
     def test_build_training_args_uses_dr_grpo_defaults(self) -> None:
         cfg = load_grpo_train_config("configs/grpo/train_cheap.yaml")
@@ -46,14 +72,21 @@ class GRPOConfigTest(unittest.TestCase):
         self.assertEqual(training_args.loss_type, "dr_grpo")
         self.assertEqual(training_args.scale_rewards, "none")
         self.assertEqual(training_args.importance_sampling_level, "sequence")
-        self.assertFalse(training_args.use_vllm)
+        self.assertTrue(training_args.mask_truncated_completions)
+        self.assertEqual(training_args.use_vllm, cfg.use_vllm)
 
     def test_aligned_compute_dtype_uses_bfloat16_when_supported(self) -> None:
         cfg = load_grpo_train_config("configs/grpo/train_cheap.yaml")
+        cfg = cfg.model_copy(update={"compute_dtype": "bfloat16"})
 
         with patch("torch.cuda.is_available", return_value=True), patch("torch.cuda.is_bf16_supported", return_value=True):
             dtype = _aligned_compute_dtype(cfg)
 
+        self.assertEqual(str(dtype), "torch.bfloat16")
+
+    def test_resolve_train_compute_dtype_uses_explicit_compute_dtype(self) -> None:
+        cfg = load_grpo_train_config("configs/grpo/train_cheap.yaml")
+        dtype = _resolve_train_compute_dtype(cfg)
         self.assertEqual(str(dtype), "torch.bfloat16")
 
 
@@ -135,6 +168,22 @@ class GRPODataTest(unittest.TestCase):
         self.assertEqual(len(dataset), 1)
         self.assertEqual(dataset[0]["final_answer"], "2")
 
+    def test_select_grpo_train_subset_keeps_full_dataset_when_limit_is_none(self) -> None:
+        dataset = load_grpo_dataset(_write_tmp_grpo_jsonl([{"id": str(i), "prompt": "p", "question": f"q{i}", "final_answer": "a", "meta": {}} for i in range(3)]))
+        subset = select_grpo_train_subset(dataset, max_train_samples=None, seed=42, mode="fixed_random")
+        self.assertEqual(len(subset), 3)
+
+    def test_select_grpo_train_subset_fixed_random_is_stable(self) -> None:
+        dataset = load_grpo_dataset(_write_tmp_grpo_jsonl([{"id": str(i), "prompt": "p", "question": f"q{i}", "final_answer": "a", "meta": {}} for i in range(10)]))
+        subset_a = select_grpo_train_subset(dataset, max_train_samples=5, seed=42, mode="fixed_random")
+        subset_b = select_grpo_train_subset(dataset, max_train_samples=5, seed=42, mode="fixed_random")
+        self.assertEqual(subset_a["id"], subset_b["id"])
+
+    def test_select_grpo_train_subset_head_takes_prefix(self) -> None:
+        dataset = load_grpo_dataset(_write_tmp_grpo_jsonl([{"id": str(i), "prompt": "p", "question": f"q{i}", "final_answer": "a", "meta": {}} for i in range(10)]))
+        subset = select_grpo_train_subset(dataset, max_train_samples=3, seed=42, mode="head")
+        self.assertEqual(subset["id"], ["0", "1", "2"])
+
 
 class GRPORewardTest(unittest.TestCase):
     def test_build_reward_functions_scores_correct_and_parse_fail(self) -> None:
@@ -176,6 +225,115 @@ class GRPOPreflightTest(unittest.TestCase):
 
         with patch("torch.cuda.is_available", return_value=True), patch("post_train.grpo.metadata.version", side_effect=fake_version):
             preflight_check(cfg)
+
+
+class GRPODTypeTest(unittest.TestCase):
+    def test_align_output_head_dtypes_only_updates_output_head(self) -> None:
+        import torch
+
+        class DummyEmbedding:
+            def __init__(self, dtype):
+                self.weight = torch.nn.Parameter(torch.zeros(2, 2, dtype=dtype))
+
+        class DummyModel:
+            def __init__(self) -> None:
+                self.output_embeddings = DummyEmbedding(torch.float32)
+                self.input_embeddings = DummyEmbedding(torch.float32)
+
+            def get_output_embeddings(self):
+                return self.output_embeddings
+
+            def get_input_embeddings(self):
+                return self.input_embeddings
+
+        model = DummyModel()
+        touched_paths = align_output_head_dtypes(model, target_dtype=torch.bfloat16)
+
+        self.assertEqual(model.output_embeddings.weight.dtype, torch.bfloat16)
+        self.assertEqual(model.input_embeddings.weight.dtype, torch.float32)
+        self.assertEqual(touched_paths, ["model.get_output_embeddings()"])
+
+    def test_align_output_head_dtypes_reaches_deep_base_model_lm_head(self) -> None:
+        import torch
+
+        class DummyHead:
+            def __init__(self, dtype):
+                self.weight = torch.nn.Parameter(torch.zeros(2, 2, dtype=dtype))
+
+        class WrappedBase:
+            def __init__(self):
+                self.lm_head = DummyHead(torch.float32)
+
+        class WrappedLora:
+            def __init__(self):
+                self.model = WrappedBase()
+
+        class WrappedPeft:
+            def __init__(self):
+                self.base_model = WrappedLora()
+
+        model = WrappedPeft()
+        touched_paths = align_output_head_dtypes(model, target_dtype=torch.bfloat16)
+        report = collect_model_dtype_report(model)
+
+        self.assertIn("model.base_model.model.lm_head", touched_paths)
+        self.assertEqual(model.base_model.model.lm_head.weight.dtype, torch.bfloat16)
+        self.assertEqual(report["model.base_model.model.lm_head.weight_dtype"], "torch.bfloat16")
+
+    def test_assert_generation_dtype_ready_rejects_mismatched_output_head(self) -> None:
+        import torch
+
+        class DummyEmbedding:
+            def __init__(self, dtype):
+                self.weight = torch.nn.Parameter(torch.zeros(2, 2, dtype=dtype))
+
+        class DummyModel:
+            def __init__(self) -> None:
+                self.output_embeddings = DummyEmbedding(torch.float32)
+
+            def get_output_embeddings(self):
+                return self.output_embeddings
+
+        with self.assertRaisesRegex(RuntimeError, "dtype 检查失败"):
+            assert_generation_dtype_ready(DummyModel(), target_dtype=torch.bfloat16)
+
+    def test_assert_generation_dtype_ready_rejects_when_no_output_head_found(self) -> None:
+        import torch
+
+        class DummyEmbedding:
+            def __init__(self, dtype):
+                self.weight = torch.nn.Parameter(torch.zeros(2, 2, dtype=dtype))
+
+        class DummyModel:
+            def __init__(self) -> None:
+                self.input_embeddings = DummyEmbedding(torch.float32)
+
+            def get_input_embeddings(self):
+                return self.input_embeddings
+
+        with self.assertRaisesRegex(RuntimeError, "未找到任何可用于生成的 output head"):
+            assert_generation_dtype_ready(DummyModel(), target_dtype=torch.bfloat16)
+
+
+class GRPOWandbTest(unittest.TestCase):
+    def test_wandb_callback_logs_only_main_metrics_by_default(self) -> None:
+        cfg = load_grpo_train_config("configs/grpo/train_cheap.yaml")
+        callback = WandbSmoothingCallback(cfg)
+
+        self.assertTrue(callback._should_log("reward/correctness"))
+        self.assertTrue(callback._should_log("reward/parse_penalty"))
+        self.assertTrue(callback._should_log("completions/mean_length"))
+        self.assertFalse(callback._should_log("loss"))
+        self.assertFalse(callback._should_log("reward_std"))
+
+    def test_wandb_callback_can_enable_debug_metrics(self) -> None:
+        cfg = load_grpo_train_config("configs/grpo/train_cheap.yaml")
+        cfg = cfg.model_copy(update={"wandb_debug_metrics": True})
+        callback = WandbSmoothingCallback(cfg)
+
+        self.assertTrue(callback._should_log("loss"))
+        self.assertTrue(callback._should_log("reward_std"))
+        self.assertTrue(callback._should_log("frac_reward_zero_std"))
 
 
 if __name__ == "__main__":

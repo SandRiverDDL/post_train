@@ -192,3 +192,23 @@ def build_grpo_dataset(cfg) -> tuple[Path, dict[str, Any]]:
 def load_grpo_dataset(path: str | Path) -> Dataset:
     rows = [GRPORecord.model_validate(row).model_dump() for row in read_json_rows(path)]
     return Dataset.from_list(rows)
+
+
+def select_grpo_train_subset(
+    dataset: Dataset,
+    *,
+    max_train_samples: int | None,
+    seed: int,
+    mode: str,
+) -> Dataset:
+    if max_train_samples is None or max_train_samples >= len(dataset):
+        return dataset
+
+    if mode == "head":
+        return dataset.select(range(max_train_samples))
+    if mode != "fixed_random":
+        raise ValueError(f"未知的 GRPO 训练子集模式: {mode}")
+
+    indices = list(range(len(dataset)))
+    random.Random(seed).shuffle(indices)
+    return dataset.select(indices[:max_train_samples])

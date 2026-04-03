@@ -25,27 +25,36 @@
   - v1 只做 exact dedup，不做 fuzzy dedup
 - `rd211` 与 `anchor` 跨池混合前，也按同一套 exact dedup 去掉重题。
 - 若 `anchor` 去重后数量不足以支撑目标占比，则限制 `rd211` 采样数量，而不是放弃比例约束。
+- 数据准备默认产出完整混合集；训练端再按配置裁剪实际读取样本数。
 
 ## 训练口径
 
+- 当前默认路线是纯 `LoRA`，不是 `QLoRA`
+- 当前默认：
+  - `load_in_4bit=false`
+  - `compute_dtype=bfloat16`
+- 当前稳定默认超参数：
+  - `max_train_samples=500`
+  - `train_subset_mode=fixed_random`
+  - `train_subset_seed=42`
+- 其余训练超参数以当前 YAML 配置为准，不在文档中重复固化
 - 默认 loss：`dr_grpo`
 - 默认关闭 reward scaling：`scale_rewards=false`
 - 默认使用 `importance_sampling_level=sequence`
+- 默认开启 `mask_truncated_completions=true`
 - 首版不手写 `GAPO`
 - 首版不把原始 `grpo` 作为默认基线；若要做对照，只通过改配置切 `loss_type`
 
 ## 资源与运行假设
 
 - `train_cheap.yaml`
-  - 面向低显存单卡保守设置
-  - `num_generations=4`
-  - `use_vllm=false`
+  - 面向当前本地默认训练配置
+  - 默认读取固定随机 500 条样本
 - `train_4090.yaml`
   - 面向 24G 4090
-  - `num_generations=8`
   - `use_vllm=true`
   - `vllm_mode=colocate`
-- 当前仓库检测到 `trl 0.24.0` 搭配 `vllm 0.12.0` 时，`GRPOTrainer` 在导入阶段就存在兼容风险。
+- 当前兼容性风险的主问题不再是 4bit 路径；当前默认已绕开 QLoRA。
 - 因此 v1 强制在训练前做 preflight：
   - 无 GPU 直接失败
   - `use_vllm=true` 时若不是 `vllm==0.10.2` 直接失败
@@ -53,16 +62,11 @@
 ## 日志口径
 
 - `wandb` 只记录必要指标，不打开 TRL 全量自动日志。
-- 只保留：
-  - `loss`
-  - `reward`
-  - `reward_std`
-  - `frac_reward_zero_std`
-  - `reward/*`
-  - `rewards/*`
+- 默认主面板只保留：
+  - `reward/correctness`
+  - `reward/parse_penalty`
   - `completions/mean_length`
-  - `completions/clipped_ratio`
-  - `entropy`
   - `clip_ratio/region_mean`
   - `learning_rate`
-- 默认按最近 `5` 次 log event 做滚动平均后再上报。
+- `loss`、`reward_std`、`frac_reward_zero_std` 等调试指标只在 `wandb_debug_metrics=true` 时记录。
+- 不再在代码里做人造 `smoothed/...` 指标，平滑交给 W&B 面板自己处理。

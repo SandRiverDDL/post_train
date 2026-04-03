@@ -39,8 +39,24 @@
 - reward 从 `configs/grpo/reward.yaml` 读取
 - 正确答案奖励 `1.0`
 - parse 失败惩罚 `-0.5`
+- 当前默认训练路线是纯 LoRA：
+  - `load_in_4bit=false`
+  - `compute_dtype=bfloat16`
+- 当前稳定默认超参数：
+  - `max_train_samples=500`
+  - `train_subset_mode=fixed_random`
+  - `train_subset_seed=42`
+  - `mask_truncated_completions=true`
+- 其余训练超参数直接以对应 YAML 为准
+- 训练端会先从完整 `train.jsonl` 中取固定随机 500 条，再交给 GRPOTrainer
 - 默认 loss 为 `dr_grpo`
-- 默认 `wandb` 只记录少量平滑后的关键指标
+- 默认 `wandb` 只记录主面板 5 个指标：
+  - `reward/correctness`
+  - `reward/parse_penalty`
+  - `completions/mean_length`
+  - `clip_ratio/region_mean`
+  - `learning_rate`
+- 若需要排障，再打开 `wandb_debug_metrics=true`
 
 注意：
 

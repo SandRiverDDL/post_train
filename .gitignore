@@ -34,3 +34,4 @@ data/
 
 unsloth_compiled_cache/
 pictures
+wandb/
