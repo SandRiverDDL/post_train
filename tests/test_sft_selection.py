@@ -4,12 +4,13 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.config import load_sft_config
-from post_train.sft_selection import checkpoint_step, scan_checkpoint_dirs, select_best_checkpoint
+from post_train.sft_selection import checkpoint_step, evaluate_checkpoint, run_checkpoint_selection, scan_checkpoint_dirs, select_best_checkpoint
 
 
 class SFTSelectionTest(unittest.TestCase):
@@ -106,6 +107,96 @@ class SFTSelectionTest(unittest.TestCase):
         best = select_best_checkpoint(records)
 
         self.assertEqual(best["checkpoint_path"], "outputs/stage1_sft/checkpoint-50")
+
+    def test_evaluate_checkpoint_preserves_model_resolution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            checkpoint_dir = Path(tmp_dir) / "checkpoint-10"
+            checkpoint_dir.mkdir()
+            sentinel_runner = object()
+            with patch(
+                "post_train.sft_selection.run_eval_task",
+                return_value={
+                    "result": {"metrics": {"normalized_accuracy": 0.25}},
+                    "result_path": "/tmp/result.json",
+                    "raw_result_path": "/tmp/raw.json",
+                    "model_resolution": {
+                        "enable_lora": True,
+                        "lora_local_path": str(checkpoint_dir),
+                        "pretrained": "/tmp/base",
+                    },
+                },
+            ) as mock_run_eval:
+                record = evaluate_checkpoint(
+                    checkpoint_path=checkpoint_dir,
+                    dataset_path=Path(tmp_dir) / "dev.jsonl",
+                    eval_cfg=object(),
+                    batch_size=1,
+                    max_new_tokens=128,
+                    limit=1,
+                    output_dir=Path(tmp_dir) / "dev_eval",
+                    runner=sentinel_runner,
+                )
+
+        self.assertTrue(record["model_resolution"]["enable_lora"])
+        self.assertEqual(record["model_resolution"]["pretrained"], "/tmp/base")
+        self.assertIs(mock_run_eval.call_args.kwargs["runner"], sentinel_runner)
+
+    def test_run_checkpoint_selection_reuses_single_runner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            train_output_dir = Path(tmp_dir) / "outputs"
+            checkpoint_a = train_output_dir / "checkpoint-10"
+            checkpoint_b = train_output_dir / "checkpoint-20"
+            for checkpoint_dir in (checkpoint_a, checkpoint_b):
+                checkpoint_dir.mkdir(parents=True)
+            eval_cfg = type(
+                "EvalCfg",
+                (),
+                {
+                    "backend": "vllm",
+                    "batch_size": 2,
+                    "max_new_tokens": 256,
+                    "model_name": "/tmp/base-model",
+                    "max_seq_length": 1536,
+                    "device": "cuda",
+                    "attn_implementation": "sdpa",
+                    "gpu_memory_utilization": 0.7,
+                    "max_lora_rank": 64,
+                },
+            )()
+            class RunnerStub:
+                def close(self) -> None:
+                    return None
+
+            runner_instance = RunnerStub()
+
+            def fake_evaluate_checkpoint(**kwargs):
+                checkpoint_path = Path(kwargs["checkpoint_path"])
+                self.assertIs(kwargs["runner"], runner_instance)
+                return {
+                    "checkpoint_path": str(checkpoint_path),
+                    "global_step": checkpoint_step(checkpoint_path),
+                    "metrics": {
+                        "normalized_accuracy": 0.5 + checkpoint_step(checkpoint_path) / 1000,
+                        "boxed_rate": 0.9,
+                        "parse_success_rate": 0.9,
+                    },
+                    "result_path": f"/tmp/{checkpoint_path.name}/result.json",
+                    "raw_result_path": f"/tmp/{checkpoint_path.name}/raw.json",
+                    "model_resolution": {"enable_lora": True, "lora_local_path": str(checkpoint_path), "pretrained": "/tmp/base-model"},
+                }
+
+            with patch("post_train.sft_selection.resolve_model_args", return_value={"pretrained": "/tmp/base-model", "gpu_memory_utilization": 0.7, "max_length": 1536, "lora_local_path": str(checkpoint_a), "max_lora_rank": 64}) as mock_resolve, patch("post_train.sft_selection.VLLMRunner", return_value=runner_instance) as mock_runner_cls, patch("post_train.sft_selection.evaluate_checkpoint", side_effect=fake_evaluate_checkpoint) as mock_evaluate:
+                result = run_checkpoint_selection(
+                    train_output_dir=train_output_dir,
+                    dataset_path=Path(tmp_dir) / "dev.jsonl",
+                    eval_cfg=eval_cfg,
+                )
+
+        self.assertEqual(mock_resolve.call_count, 1)
+        self.assertEqual(mock_runner_cls.call_count, 1)
+        self.assertEqual(mock_evaluate.call_count, 2)
+        self.assertTrue(result["ranking_path"].endswith("dev_ranking.json"))
+        self.assertTrue(result["best_path"].endswith("best_checkpoint.json"))
 
 
 if __name__ == "__main__":

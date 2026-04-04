@@ -58,6 +58,7 @@
 - `stage1` 基础数据与训练：[runbooks/stage1.md](runbooks/stage1.md)
 - `on-policy` 单轮与循环：[runbooks/on_policy.md](runbooks/on_policy.md)
 - 通用评测与 AIME：[runbooks/eval.md](runbooks/eval.md)
+- 远端代理与 Codex 运行：[runbooks/remote_proxy.md](runbooks/remote_proxy.md)
 - 暂停路线 `stage2 / SIMPO`：[runbooks/paused_routes.md](runbooks/paused_routes.md)
 
 ## 使用约定

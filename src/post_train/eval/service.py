@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from post_train.config import EvalConfig, EvalTaskConfig
 
 from .io import resolve_task_output_paths, write_eval_result, write_raw_eval_result
 from .metrics import result_from_vllm_raw_logs
-from .vllm import build_task_name, resolve_model_args, run_vllm_raw_eval
+from .vllm import VLLMRunner, build_task_name, describe_model_resolution, resolve_model_args, run_vllm_raw_eval
 
 
 def resolve_eval_tasks(
@@ -47,6 +48,7 @@ def run_eval_task(
     limit: int | None,
     output_dir: str | Path | None = None,
     max_lora_rank: int | None = None,
+    runner: VLLMRunner | None = None,
 ) -> dict[str, object]:
     model_args = resolve_model_args(
         model_name,
@@ -58,17 +60,24 @@ def run_eval_task(
         gpu_memory_utilization=eval_cfg.gpu_memory_utilization,
         max_lora_rank=max_lora_rank if max_lora_rank is not None else eval_cfg.max_lora_rank,
     )
-    raw_result = run_vllm_raw_eval(
-        model_args=model_args,
-        dataset_path=task.dataset_path,
-        task_name=task.name,
-        batch_size=batch_size,
-        limit=limit,
-        max_gen_toks=max_new_tokens,
-        samples_per_problem=task.samples_per_problem,
-        sampling_temperature=task.sampling_temperature,
-        sampling_top_p=task.sampling_top_p,
-    )
+    model_resolution = describe_model_resolution(model_name, eval_cfg.model_name, model_args)
+    for key, value in sorted(model_resolution.items()):
+        print(f"eval.model_resolution.{key}={value}")
+    raw_eval_kwargs: dict[str, Any] = {
+        "model_args": model_args,
+        "dataset_path": task.dataset_path,
+        "task_name": task.name,
+        "batch_size": batch_size,
+        "limit": limit,
+        "max_gen_toks": max_new_tokens,
+        "samples_per_problem": task.samples_per_problem,
+        "sampling_temperature": task.sampling_temperature,
+        "sampling_top_p": task.sampling_top_p,
+    }
+    if runner is None:
+        raw_result = run_vllm_raw_eval(**raw_eval_kwargs)
+    else:
+        raw_result = runner.generate_raw_eval(**raw_eval_kwargs)
     result = result_from_vllm_raw_logs(
         raw_result,
         task_name=task.name,
@@ -88,4 +97,5 @@ def run_eval_task(
         "result": result,
         "result_path": str(final_output_path),
         "raw_result_path": str(raw_output_path),
+        "model_resolution": model_resolution,
     }

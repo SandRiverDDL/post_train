@@ -2,56 +2,83 @@
 
 ## 当前阶段
 
-当前仓库主线已转向 `on-policy SFT`，正在从已有 `stage1 SFT` 基线切换到新的数据生成与继续训练方向。
+当前仓库的实际工作重心已切到 `GRPO / DAPO-lite` 实验，`on-policy SFT` 与旧的两阶段 `SFT + SIMPO` 保留为历史路线与候选路线，不再作为当前主线。
+
+当前默认工作环境为服务器仓库 `~/dataY/post_train`；文档、代码、配置与实验结果都以服务器副本为准。
 
 ## 当前有效基线
 
 - 代码主包：`src/post_train/`
-- 当前 on-policy 内部实现已收口到 `src/post_train/on_policy/` 子包；顶层 `on_policy_loop.py` 与 `on_policy_query_strategy.py` 仅保留兼容导出
-- 当前实验摘要统一落到 `outputs/*/run_summary.json`，实验索引统一追加到 `experiments/registry.jsonl`
-- 当前实验汇总表 `experiments/summary.md` 以 `math500/gsm8k` 的 `avg_rank` 为主排序；缺 benchmark 的旧实验会单独落到 `Incomplete Runs`
-- 薄入口：`prepare_stage1_data.py`、`prepare_eval_data.py`、`check_sft_data.py`、`train_sft.py`、`eval_model.py`、`prepare_on_policy_sft_data.py`、`run_on_policy_loop.py`、`prepare_simpo_data.py`、`train_simpo.py`、`train_grpo.py`、`run_experiment_workflow.py`
-- 配置目录：`configs/eval/`、`configs/on_policy/`、`configs/stage1/`、`configs/stage2/`、`configs/simpo/`、`configs/grpo/`、`configs/workflow/`
+- 当前正式开发与实验环境：服务器仓库 `~/dataY/post_train`
 - 当前开发模型：`Qwen/Qwen2.5-Math-1.5B`
-- 当前 `stage1` 数据口径：`UWNSL/MATH_training_split_short_cot`，首版规模 `2000`
-- 当前保留一条独立 `stage1_mix_long` 实验线：`UWNSL/Mix-Long_long_0.2_short_0.8`
-- 当前保留一条独立 `stage1_math220k` 对照线：`qingy2024/OpenR1-Math-220k-Cleaned`
-- 当前 on-policy 数据口径：固定使用 `data/stage1/train_5000.jsonl` 作为 query registry，并保留全量轨迹归档
-- 当前基础起点：`outputs/stage1_sft_5000/checkpoint-200`
+- 当前 `GRPO` 基础起点：`outputs/stage1_mix_long_sft/checkpoint-300`
+- 当前 `GRPO` 训练数据：`data/grpo/train.jsonl`
+- 当前 `GRPO` 双卡入口：`scripts/run_grpo_3090_dapo_server.py`
+- 当前 `GRPO` 双卡编排：`src/post_train/grpo_server.py`
+- 当前单轮实验编排入口：`scripts/run_experiment_workflow.py`
 - 当前评测结果目录口径：`outputs/eval/<模型路径>/<task>/result.json` 与 `raw.json`
-- 暂停中的候选路线：`docs/experiments/two-stage-sft-simpo.md`
-- 新增独立实验路线：`GRPO`，当前仍未升级为仓库主线
-- 新增单轮实验编排入口：`scripts/run_experiment_workflow.py`，当前 v1 只支持 `GRPO -> dev 选 best ckpt -> math500/gsm8k -> baseline 对比`
+- 当前 checkpoint 选择输出口径：`<train_output_dir>/dev_eval/dev_ranking.json` 与 `best_checkpoint.json`
+- 当前 `select_sft_checkpoint.py` / `eval_model.py` 已补齐 `model_resolution` 诊断，可明确记录：
+  - `pretrained`
+  - `enable_lora`
+  - `lora_local_path`
+- 当前 `train_grpo.py` 已补齐 `grpo.adapter.*` 诊断，可明确记录：
+  - 是否从 adapter checkpoint 继续训练
+  - LoRA 参数数量
+  - 训练时活跃 adapter 与底模路径
+
+## 当前已确认事实
+
+- `GRPO` 训练与评测链路都能确认 `LoRA` 已正确挂上，不是静默退化成 `base model`
+- 先前某轮 dev 结果异常偏低，主因是评测时 `max_new_tokens=512` 导致大量截断，而不是 checkpoint 没挂 LoRA
+- 当前 `stage1_mix_long_sft/checkpoint-300` 在 `math500_dev200` 上约为 `0.635 ~ 0.645`
+- 当前 `grpo_3090_dapo_server/checkpoint-30` 在 `math500_dev200` 上约为 `0.63`
+- 以 `math500_dev200` 的 `200` 题规模来看，这一档差异仍处在高噪声区间，不能据此认定 `GRPO` 已明显优于或劣于当前 SFT 基线
 
 ## 当前最重要的问题
 
-1. 还缺少在 `stage1_train_5000` seen-pool 上的真实首轮 self-refine 结果，对比 `mixed_only_shortest` 与 `any_correct_shortest` 两条线。
-2. 还缺少修复后多轮实验结果来判断当前默认早停口径是否有效。
-3. `AIME24/AIME25` sampled pass@1 评测刚接入，仍缺少目标机器上的真实运行验证。
-4. 远程数据下载在当前环境里不稳定。
-5. 暂停路线仍保留在仓库里，文档与执行主线必须持续区分清楚。
-6. `stage1_mix_long` 作为独立实验线，仍需和当前 on-policy 主线分开解读，不自动视为新基线。
-7. `GRPO` 当前主要风险不是算法本身，而是目标机器上的 `TRL / vLLM / CUDA` 兼容性与显存预算。
+1. `GRPO / DAPO-lite` 目前尚未在 `math500_dev200` 上稳定超过 `stage1_mix_long_sft/checkpoint-300`。
+2. `math500_dev200` 只有 `200` 题，单次评测标准误差约在 `0.034` 档，当前小幅波动不足以支持强结论。
+3. `select_sft_checkpoint.py` 当前逐 checkpoint 重新创建 `LLM(...)`，导致反复冷启动 `vLLM`，checkpoint 选择耗时过高。
+4. `GRPO` 早期训练仍存在格式习惯容易被冲坏的风险，需要继续观察：
+   - `boxed_rate`
+   - `parse_success_rate`
+   - `completions/clipped_ratio`
+   - `entropy`
+5. 旧路线文档仍在仓库中保留，必须继续和当前 `GRPO` 主线区分，不自动视为当前推荐配置。
 
 ## 当前优先级
 
-1. 在目标机器上跑通 `stage1_train_5000` query registry 的单轮数据准备，确认轨迹归档与双 selector 输出正确。
-2. 观察 `all_correct / mixed / all_wrong`、长度统计与 holdout 结果，比较 `mixed_only_shortest` 与 `any_correct_shortest`。
-3. 验证当前 `patience=3` 的默认早停口径是否稳健。
-4. 若 seen-pool self-refine 仍无提升，再扩到新的 query 池或切换 mixed SFT 主线。
+1. 把 `GRPO / DAPO-lite` 的 checkpoint 选择与 benchmark 评测跑顺，先确认单 seed 下是否至少不差于当前 SFT 基线。
+2. 优化 checkpoint 选择链路，避免每个 checkpoint 反复重启 `vLLM`。
+3. 继续盯 `boxed_rate / parse_success_rate / clipped_ratio / entropy`，确认当前 reward 与长度设置不会在早期破坏格式输出。
+4. 只有当单 seed 结果达到“至少不差于基线”时，再考虑做 `3 seed` 复验，而不是现在就对每组配置做多 seed 全覆盖。
 
-## 当前 Stage1 口径
+## 当前 GRPO 口径
 
-- 训练预算：`2 epoch`
-- checkpoint 保存：每 `25` step 存一次
-- 完成判定：训练结束后统一在冻结 `dev200` 上评测全部 checkpoints
-- best 选择指标：`normalized_accuracy`
+- 当前默认双卡路线：`1 训 1 推`
+  - trainer 优先 `GPU 6`
+  - `vLLM server` 优先 `GPU 7`
+  - 若 `6/7` 空余显存不足，再回退到其他空闲卡对
+- 当前 DAPO-lite 配置：
+  - `vllm_mode=server`
+  - `loss_type=dapo`
+  - `epsilon=0.2`
+  - `epsilon_high=0.28`
+  - `mask_truncated_completions=true`
+  - `max_completion_length=768`
+  - `soft_overlong.weight=0.05`
+  - `soft_overlong.cache_tokens=192`
+- 当前 `GRPO` 判读优先级：
+  - 先看 `math500_dev200`
+  - 再看 `math500_test` 与 `gsm8k_test`
+  - 不允许用 benchmark test 集反向挑 checkpoint
 
 ## 文档口径
 
 - 稳定规则看 `AGENTS.md`
 - 当前阶段设计看 `docs/SPEC.md`
-- 实验索引与自动汇总看 `docs/experiments/README.md`
-- 暂停路线看 `docs/experiments/two-stage-sft-simpo.md`
 - 结构分层看 `docs/ARCHITECTURE.md`
 - 当前状态看 `docs/STATE.md`
+- `GRPO` 运行与操作说明看 `docs/runbooks/grpo.md`
+- 旧路线实验记录看 `docs/experiments/README.md` 与 `docs/experiments/two-stage-sft-simpo.md`

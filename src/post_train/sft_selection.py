@@ -6,10 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from post_train.config import EvalConfig, EvalTaskConfig
-from post_train.eval import (
-    run_eval_task,
-)
-from post_train.io import ensure_parent
+from post_train.eval import VLLMRunner, resolve_model_args, run_eval_task
 
 CHECKPOINT_RE = re.compile(r"checkpoint-(\d+)$")
 
@@ -42,6 +39,7 @@ def evaluate_checkpoint(
     max_new_tokens: int,
     limit: int | None,
     output_dir: str | Path,
+    runner: VLLMRunner | None = None,
 ) -> dict[str, Any]:
     checkpoint_dir = Path(checkpoint_path)
     run_result = run_eval_task(
@@ -55,6 +53,7 @@ def evaluate_checkpoint(
         max_new_tokens=max_new_tokens,
         limit=limit,
         output_dir=Path(output_dir) / checkpoint_dir.name,
+        runner=runner,
     )
     result = run_result["result"]
     return {
@@ -63,6 +62,7 @@ def evaluate_checkpoint(
         "metrics": result["metrics"],
         "result_path": str(run_result["result_path"]),
         "raw_result_path": str(run_result["raw_result_path"]),
+        "model_resolution": run_result.get("model_resolution", {}),
     }
 
 
@@ -89,13 +89,20 @@ def write_best_checkpoint_summary(
     records: list[dict[str, Any]],
 ) -> tuple[Path, Path]:
     base = Path(output_dir)
-    summary_path = ensure_parent(base / "dev_ranking.json")
-    best_path = ensure_parent(base / "best_checkpoint.json")
+    summary_path = base / "dev_ranking.json"
+    best_path = base / "best_checkpoint.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
     best_record = select_best_checkpoint(records)
     summary = {
         "dataset_path": str(dataset_path),
         "runner": "vllm_raw",
         "selection_metric": "normalized_accuracy",
+        "selection_guidance": {
+            "dev_dataset_role": "coarse_filter",
+            "small_delta_threshold": 0.03,
+            "clear_change_threshold": 0.05,
+            "multi_seed_policy": "仅当单 seed 至少不差于基线时，再做 3 个训练 seed 复验。",
+        },
         "records": records,
         "best": best_record,
     }
@@ -111,6 +118,7 @@ def write_best_checkpoint_summary(
                 "dev_dataset": str(dataset_path),
                 "selection_metric": "normalized_accuracy",
                 "ranking_path": str(summary_path),
+                "model_resolution": best_record.get("model_resolution", {}),
             },
             fh,
             ensure_ascii=False,
@@ -136,19 +144,36 @@ def run_checkpoint_selection(
     resolved_max_new_tokens = int(max_new_tokens if max_new_tokens is not None else eval_cfg.max_new_tokens)
 
     checkpoint_dirs = scan_checkpoint_dirs(train_output_dir)
+    if not checkpoint_dirs:
+        raise ValueError(f"未在 {train_output_dir} 下找到任何 checkpoint-<step> 目录。")
     ranking_output_dir = Path(train_output_dir) / "dev_eval"
-    records = [
-        evaluate_checkpoint(
-            checkpoint_path=checkpoint_dir,
-            dataset_path=dataset_path,
-            eval_cfg=eval_cfg,
-            batch_size=resolved_batch_size,
-            max_new_tokens=resolved_max_new_tokens,
-            limit=limit,
-            output_dir=ranking_output_dir,
-        )
-        for checkpoint_dir in checkpoint_dirs
-    ]
+    first_model_args = resolve_model_args(
+        str(checkpoint_dirs[0]),
+        eval_cfg.model_name,
+        backend=resolved_backend,
+        max_length=eval_cfg.max_seq_length,
+        device=eval_cfg.device,
+        attn_implementation=eval_cfg.attn_implementation,
+        gpu_memory_utilization=eval_cfg.gpu_memory_utilization,
+        max_lora_rank=eval_cfg.max_lora_rank,
+    )
+    runner = VLLMRunner(first_model_args)
+    try:
+        records = [
+            evaluate_checkpoint(
+                checkpoint_path=checkpoint_dir,
+                dataset_path=dataset_path,
+                eval_cfg=eval_cfg,
+                batch_size=resolved_batch_size,
+                max_new_tokens=resolved_max_new_tokens,
+                limit=limit,
+                output_dir=ranking_output_dir,
+                runner=runner,
+            )
+            for checkpoint_dir in checkpoint_dirs
+        ]
+    finally:
+        runner.close()
     ranking_path, best_path = write_best_checkpoint_summary(
         output_dir=ranking_output_dir,
         dataset_path=dataset_path,

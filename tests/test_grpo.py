@@ -18,6 +18,7 @@ from post_train.grpo import (
     assert_generation_dtype_ready,
     align_output_head_dtypes,
     build_training_args,
+    collect_adapter_diagnostics,
     collect_model_dtype_report,
     preflight_check,
 )
@@ -188,7 +189,7 @@ class GRPODataTest(unittest.TestCase):
 class GRPORewardTest(unittest.TestCase):
     def test_build_reward_functions_scores_correct_and_parse_fail(self) -> None:
         cfg = load_grpo_reward_config("configs/grpo/reward.yaml")
-        reward_funcs = build_reward_functions(cfg)
+        reward_funcs = build_reward_functions(cfg, max_completion_length=768)
         correctness_reward = reward_funcs[0]
         parse_penalty_reward = reward_funcs[1]
 
@@ -196,7 +197,7 @@ class GRPORewardTest(unittest.TestCase):
         final_answers = ["2", "3"]
 
         self.assertEqual(correctness_reward(completions, final_answers), [1.0, 0.0])
-        self.assertEqual(parse_penalty_reward(completions, final_answers), [0.0, -0.5])
+        self.assertEqual(parse_penalty_reward(completions, final_answers), [0.0, -0.1])
 
 
 class GRPOPreflightTest(unittest.TestCase):
@@ -208,7 +209,7 @@ class GRPOPreflightTest(unittest.TestCase):
                 preflight_check(cfg)
 
     def test_preflight_rejects_incompatible_vllm_version(self) -> None:
-        cfg = load_grpo_train_config("configs/grpo/train_4090.yaml")
+        cfg = load_grpo_train_config("configs/grpo/train_3090.yaml")
 
         def fake_version(name: str) -> str:
             return {"trl": "0.24.0", "vllm": "0.12.0"}[name]
@@ -218,7 +219,7 @@ class GRPOPreflightTest(unittest.TestCase):
                 preflight_check(cfg)
 
     def test_preflight_allows_newer_trl_with_current_vllm(self) -> None:
-        cfg = load_grpo_train_config("configs/grpo/train_4090.yaml")
+        cfg = load_grpo_train_config("configs/grpo/train_3090.yaml")
 
         def fake_version(name: str) -> str:
             return {"trl": "0.25.1", "vllm": "0.12.0"}[name]
@@ -315,6 +316,42 @@ class GRPODTypeTest(unittest.TestCase):
             assert_generation_dtype_ready(DummyModel(), target_dtype=torch.bfloat16)
 
 
+class GRPODiagnosticsTest(unittest.TestCase):
+    def test_collect_adapter_diagnostics_reports_loaded_lora(self) -> None:
+        import torch
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            adapter_dir = Path(tmp_dir) / "checkpoint-10"
+            adapter_dir.mkdir()
+            (adapter_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
+
+            class DummyModel:
+                def __init__(self) -> None:
+                    self.peft_config = {"default": type("Cfg", (), {"base_model_name_or_path": "/tmp/base"})()}
+                    self.active_adapter = "default"
+                    self._params = [
+                        ("base.weight", torch.nn.Parameter(torch.zeros(4), requires_grad=False)),
+                        ("model.layers.0.self_attn.q_proj.lora_A.default.weight", torch.nn.Parameter(torch.zeros(8), requires_grad=True)),
+                        ("model.layers.0.self_attn.q_proj.lora_B.default.weight", torch.nn.Parameter(torch.zeros(8), requires_grad=True)),
+                    ]
+
+                def named_parameters(self):
+                    yield from self._params
+
+                def parameters(self):
+                    for _, parameter in self._params:
+                        yield parameter
+
+            cfg = type("Cfg", (), {"base_model_name": "/tmp/base", "model_name_or_path": str(adapter_dir)})()
+            diagnostics = collect_adapter_diagnostics(DummyModel(), cfg)
+
+        self.assertTrue(diagnostics["requested_path_is_adapter_dir"])
+        self.assertTrue(diagnostics["is_peft_model"])
+        self.assertEqual(diagnostics["adapter_base_model_name_or_path"], "/tmp/base")
+        self.assertGreater(diagnostics["lora_param_count"], 0)
+        self.assertEqual(diagnostics["resolved_adapter_name"], "default")
+
+
 class GRPOWandbTest(unittest.TestCase):
     def test_wandb_callback_logs_only_main_metrics_by_default(self) -> None:
         cfg = load_grpo_train_config("configs/grpo/train_cheap.yaml")
@@ -327,7 +364,7 @@ class GRPOWandbTest(unittest.TestCase):
         self.assertTrue(callback._should_log("rewards/correctness_reward/mean"))
         self.assertTrue(callback._should_log("completions/mean_length"))
         self.assertFalse(callback._should_log("loss"))
-        self.assertFalse(callback._should_log("entropy"))
+        self.assertTrue(callback._should_log("entropy"))
 
     def test_wandb_callback_can_enable_debug_metrics(self) -> None:
         cfg = load_grpo_train_config("configs/grpo/train_cheap.yaml")

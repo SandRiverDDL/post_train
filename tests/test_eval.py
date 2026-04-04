@@ -16,14 +16,16 @@ from post_train.config import load_eval_config
 from post_train.eval import (
     build_eval_result,
     rate_stderr,
-    resolve_model_args,
     resolve_eval_tasks,
     resolve_task_output_paths,
     result_from_vllm_raw_logs,
+    run_eval_task,
     run_vllm_raw_eval,
+    VLLMRunner,
     summarize_metrics_for_console,
     write_raw_eval_result,
 )
+from post_train.eval.vllm import build_vllm_runner_spec, describe_model_resolution, resolve_model_args
 
 
 class EvalPipelineTest(unittest.TestCase):
@@ -259,6 +261,7 @@ class EvalPipelineTest(unittest.TestCase):
             adapter_dir = Path(tmp_dir) / "adapter"
             adapter_dir.mkdir()
             (adapter_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
+            (adapter_dir / "adapter_model.safetensors").write_text("stub", encoding="utf-8")
 
             model_args = resolve_model_args(
                 str(adapter_dir),
@@ -274,6 +277,75 @@ class EvalPipelineTest(unittest.TestCase):
         self.assertEqual(model_args["pretrained"], "Qwen/Qwen2.5-Math-1.5B")
         self.assertEqual(model_args["lora_local_path"], str(adapter_dir))
         self.assertEqual(model_args["max_lora_rank"], 32)
+
+    def test_describe_model_resolution_marks_adapter_eval(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            adapter_dir = Path(tmp_dir) / "adapter"
+            adapter_dir.mkdir()
+            (adapter_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
+            (adapter_dir / "adapter_model.safetensors").write_text("stub", encoding="utf-8")
+            model_args = resolve_model_args(
+                str(adapter_dir),
+                "/tmp/base",
+                backend="vllm",
+                max_length=1536,
+                device="cuda",
+                attn_implementation="sdpa",
+                gpu_memory_utilization=0.7,
+                max_lora_rank=64,
+            )
+
+        resolution = describe_model_resolution(str(adapter_dir), "/tmp/base", model_args)
+
+        self.assertTrue(resolution["enable_lora"])
+        self.assertTrue(resolution["target_is_adapter_dir"])
+        self.assertEqual(resolution["pretrained"], "/tmp/base")
+        self.assertEqual(resolution["lora_local_path"], str(adapter_dir))
+        self.assertEqual(resolution["max_lora_rank"], 64)
+
+    def test_run_eval_task_returns_model_resolution_for_adapter_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            dataset_path = tmp_path / "toy.jsonl"
+            dataset_path.write_text(
+                json.dumps({"id": "1", "question": "1+1=?", "final_answer": "2"}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            adapter_dir = tmp_path / "checkpoint-10"
+            adapter_dir.mkdir()
+            (adapter_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
+            (adapter_dir / "adapter_model.safetensors").write_text("stub", encoding="utf-8")
+            config_path = tmp_path / "eval.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "model_name: /tmp/base",
+                        f"dataset_path: {dataset_path}",
+                        f"output_dir: {tmp_path / 'outputs'}",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            cfg = load_eval_config(config_path)
+
+            with patch("post_train.eval.service.run_vllm_raw_eval", return_value={"samples": {"toy": []}, "timing": {"total_seconds": 1.0}}), patch(
+                "post_train.eval.service.result_from_vllm_raw_logs",
+                return_value={"metrics": {"normalized_accuracy": 0.0}},
+            ):
+                run_result = run_eval_task(
+                    model_name=str(adapter_dir),
+                    task=cfg.tasks[0],
+                    eval_cfg=cfg,
+                    batch_size=1,
+                    max_new_tokens=64,
+                    limit=1,
+                    output_dir=tmp_path / "outputs",
+                    max_lora_rank=32,
+                )
+
+        self.assertTrue(run_result["model_resolution"]["enable_lora"])
+        self.assertEqual(run_result["model_resolution"]["pretrained"], "/tmp/base")
+        self.assertEqual(run_result["model_resolution"]["lora_local_path"], str(adapter_dir))
 
     def test_result_from_vllm_raw_logs_matches_current_result_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -370,9 +442,16 @@ class EvalPipelineTest(unittest.TestCase):
 
             calls: list[dict[str, object]] = []
 
+            class FakeEngine:
+                def shutdown(self) -> None:
+                    calls.append({"shutdown": True})
+
             class FakeLLM:
-                def __init__(self, **kwargs) -> None:
+                def __init__(self, model=None, **kwargs) -> None:
+                    self.model = model
                     self.kwargs = kwargs
+                    self.llm_engine = FakeEngine()
+                    calls.append({"init_model": model, "init_kwargs": kwargs})
 
                 def generate(self, prompts, sampling_params=None, use_tqdm=False, lora_request=None):
                     calls.append(
@@ -423,12 +502,108 @@ class EvalPipelineTest(unittest.TestCase):
                     sampling_top_p=0.95,
                 )
 
-        self.assertEqual(calls[1]["prompt_count"], 2)
-        self.assertEqual(calls[0]["sampling_params"]["n"], 4)
-        self.assertEqual(calls[0]["sampling_params"]["temperature"], 0.6)
-        self.assertEqual(calls[0]["sampling_params"]["top_p"], 0.95)
+        self.assertEqual(calls[2]["prompt_count"], 2)
+        self.assertEqual(calls[1]["sampling_params"]["n"], 4)
+        self.assertEqual(calls[1]["sampling_params"]["temperature"], 0.6)
+        self.assertEqual(calls[1]["sampling_params"]["top_p"], 0.95)
         self.assertEqual(result["runner"], "vllm_raw")
         self.assertEqual(len(result["samples"]["toy"]), 2)
+        self.assertTrue(calls[-1]["shutdown"])
+
+    def test_vllm_runner_reuses_llm_and_switches_lora_request(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dataset_path = Path(tmp_dir) / "toy.jsonl"
+            adapter_a = Path(tmp_dir) / "checkpoint-10"
+            adapter_b = Path(tmp_dir) / "checkpoint-20"
+            for adapter_dir in (adapter_a, adapter_b):
+                adapter_dir.mkdir()
+                (adapter_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
+                (adapter_dir / "adapter_model.safetensors").write_text("weights", encoding="utf-8")
+            dataset_path.write_text(json.dumps({"id": "1", "question": "1+1=?", "final_answer": "2"}, ensure_ascii=False) + "\n", encoding="utf-8")
+
+            calls: list[dict[str, object]] = []
+
+            class FakeEngine:
+                def shutdown(self) -> None:
+                    calls.append({"shutdown": True})
+
+            class FakeLLM:
+                def __init__(self, model=None, **kwargs) -> None:
+                    self.llm_engine = FakeEngine()
+                    calls.append({"init_model": model, "init_kwargs": kwargs})
+
+                def generate(self, prompts, sampling_params=None, use_tqdm=False, lora_request=None):
+                    calls.append({"lora_request": lora_request, "prompt_count": len(prompts)})
+                    return [SimpleNamespace(outputs=[SimpleNamespace(text="\\boxed{2}")])]
+
+            class FakeSamplingParams:
+                def __init__(self, **kwargs) -> None:
+                    self.kwargs = kwargs
+
+            class FakeLoRARequest:
+                def __init__(self, adapter_name, adapter_id, lora_path) -> None:
+                    self.adapter_name = adapter_name
+                    self.adapter_id = adapter_id
+                    self.lora_path = lora_path
+
+            fake_vllm = ModuleType("vllm")
+            fake_vllm.LLM = FakeLLM
+            fake_vllm.SamplingParams = FakeSamplingParams
+            fake_lora_request_module = ModuleType("vllm.lora.request")
+            fake_lora_request_module.LoRARequest = FakeLoRARequest
+
+            base_model_args = resolve_model_args(
+                str(adapter_a),
+                "Qwen/Qwen2.5-Math-1.5B",
+                backend="vllm",
+                max_length=1536,
+                device="cuda",
+                attn_implementation="sdpa",
+                gpu_memory_utilization=0.7,
+                max_lora_rank=64,
+            )
+            alt_model_args = resolve_model_args(
+                str(adapter_b),
+                "Qwen/Qwen2.5-Math-1.5B",
+                backend="vllm",
+                max_length=1536,
+                device="cuda",
+                attn_implementation="sdpa",
+                gpu_memory_utilization=0.7,
+                max_lora_rank=64,
+            )
+
+            with patch.dict(sys.modules, {"vllm": fake_vllm, "vllm.lora.request": fake_lora_request_module}):
+                runner = VLLMRunner(base_model_args)
+                try:
+                    runner.generate_raw_eval(
+                        model_args=base_model_args,
+                        dataset_path=dataset_path,
+                        task_name="toy",
+                        batch_size=1,
+                        limit=None,
+                        max_gen_toks=64,
+                    )
+                    runner.generate_raw_eval(
+                        model_args=alt_model_args,
+                        dataset_path=dataset_path,
+                        task_name="toy",
+                        batch_size=1,
+                        limit=None,
+                        max_gen_toks=64,
+                    )
+                finally:
+                    runner.close()
+
+        init_calls = [item for item in calls if "init_model" in item]
+        generate_calls = [item for item in calls if "lora_request" in item]
+        self.assertEqual(len(init_calls), 1)
+        self.assertEqual(len(generate_calls), 2)
+        self.assertNotEqual(generate_calls[0]["lora_request"].adapter_name, generate_calls[1]["lora_request"].adapter_name)
+        self.assertNotEqual(generate_calls[0]["lora_request"].adapter_id, generate_calls[1]["lora_request"].adapter_id)
+        self.assertEqual(generate_calls[0]["lora_request"].lora_path, str(adapter_a))
+        self.assertEqual(generate_calls[1]["lora_request"].lora_path, str(adapter_b))
+        self.assertTrue(calls[-1]["shutdown"])
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,7 +14,7 @@ from .metrics import (
     summarize_metrics_for_console,
 )
 from .service import resolve_eval_tasks, run_eval_task
-from .vllm import build_task_name, resolve_model_args, run_vllm_raw_eval
+from .vllm import VLLMRunner, build_task_name, resolve_model_args, run_vllm_raw_eval
 
 __all__ = [
     "build_eval_result",
@@ -29,6 +29,7 @@ __all__ = [
     "run_eval_task",
     "run_vllm_raw_eval",
     "summarize_metrics_for_console",
+    "VLLMRunner",
     "write_eval_result",
     "write_raw_eval_result",
 ]

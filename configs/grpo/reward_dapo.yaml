@@ -7,4 +7,4 @@ parse_penalty:
 soft_overlong:
   enabled: true
   weight: 0.05
-  cache_tokens: 192
+  cache_tokens: 128
