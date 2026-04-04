@@ -33,34 +33,12 @@ def build_parse_penalty_reward(cfg) -> Callable[..., list[float]]:
     return reward
 
 
-def build_soft_overlong_reward(cfg, *, max_completion_length: int) -> Callable[..., list[float]]:
-    weight = cfg.soft_overlong.weight
-    cache_tokens = cfg.soft_overlong.cache_tokens
-    soft_start = max(max_completion_length - cache_tokens, 0)
-
-    def reward(completion_ids, **kwargs):
-        rewards: list[float] = []
-        for token_ids in completion_ids:
-            length = len(token_ids)
-            if length <= soft_start:
-                rewards.append(0.0)
-                continue
-            overlong_ratio = min((length - soft_start) / max(cache_tokens, 1), 1.0)
-            rewards.append(-weight * overlong_ratio)
-        return rewards
-
-    reward.__name__ = "soft_overlong_reward"
-    return reward
-
-
-def build_reward_functions(cfg, *, max_completion_length: int) -> list[Callable[..., list[float]]]:
+def build_reward_functions(cfg) -> list[Callable[..., list[float]]]:
     reward_funcs: list[Callable[..., list[float]]] = []
     if cfg.correctness.enabled:
         reward_funcs.append(build_correctness_reward(cfg))
     if cfg.parse_penalty.enabled:
         reward_funcs.append(build_parse_penalty_reward(cfg))
-    if cfg.soft_overlong.enabled:
-        reward_funcs.append(build_soft_overlong_reward(cfg, max_completion_length=max_completion_length))
     if not reward_funcs:
         raise ValueError("至少需要启用一个 reward 组件。")
     return reward_funcs

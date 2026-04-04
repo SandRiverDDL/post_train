@@ -43,7 +43,12 @@ def extract_final_answer(text: str) -> Optional[str]:
     match = FINAL_ANSWER_RE.search(text)
     if match:
         answer = match.group(1).strip()
-        first_line = answer.splitlines()[0].strip()
+        if not answer:
+            return None
+        lines = answer.splitlines()
+        if not lines:
+            return None
+        first_line = lines[0].strip()
         return first_line or None
     return None
 

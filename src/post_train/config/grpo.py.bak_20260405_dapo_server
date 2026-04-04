@@ -36,20 +36,11 @@ class RewardComponentConfig(BaseModel):
     weight: float = 1.0
 
 
-class SoftOverlongRewardConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = False
-    weight: float = 0.1
-    cache_tokens: int = Field(default=128, ge=1)
-
-
 class GRPORewardConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     correctness: RewardComponentConfig = RewardComponentConfig(weight=1.0)
     parse_penalty: RewardComponentConfig = RewardComponentConfig(weight=-0.5)
-    soft_overlong: SoftOverlongRewardConfig = SoftOverlongRewardConfig()
 
 
 class GRPOTrainConfig(BaseModel):
@@ -96,9 +87,6 @@ class GRPOTrainConfig(BaseModel):
     mask_truncated_completions: bool = True
     use_vllm: bool = False
     vllm_mode: Literal["server", "colocate"] = "colocate"
-    vllm_server_base_url: str | None = None
-    vllm_server_host: str = "127.0.0.1"
-    vllm_server_port: int = Field(default=8000, ge=1)
     vllm_gpu_memory_utilization: float = Field(default=0.25, gt=0.0, le=1.0)
     vllm_tensor_parallel_size: int = Field(default=1, ge=1)
     report_to: Literal["none", "wandb"] = "wandb"

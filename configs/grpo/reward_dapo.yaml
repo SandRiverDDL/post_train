@@ -1,0 +1,10 @@
+correctness:
+  enabled: true
+  weight: 1.0
+parse_penalty:
+  enabled: true
+  weight: -0.1
+soft_overlong:
+  enabled: true
+  weight: 0.05
+  cache_tokens: 192

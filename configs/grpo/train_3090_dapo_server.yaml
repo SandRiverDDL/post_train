@@ -1,0 +1,24 @@
+extends: train_cheap.yaml
+output_dir: outputs/grpo_3090_dapo_server
+reward_config: configs/grpo/reward_dapo.yaml
+
+max_train_samples: 512
+
+use_vllm: true
+vllm_mode: server
+vllm_server_base_url: http://127.0.0.1:8000
+max_completion_length: 768
+
+epochs: 1.0
+batch_size: 8
+gradient_accumulation_steps: 4
+num_generations: 8
+
+loss_type: dapo
+epsilon: 0.2
+epsilon_high: 0.28
+
+beta: 0.0
+
+save_steps: 10
+save_total_limit: 10

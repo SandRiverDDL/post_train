@@ -1,0 +1,7 @@
+route: grpo
+train_config: configs/grpo/train_3090_dapo_server.yaml
+eval_config: configs/eval/default.yaml
+dev_dataset: data/eval/math500_dev200.jsonl
+benchmark_tasks:
+  - math500
+  - gsm8k

@@ -37,3 +37,4 @@ pictures
 wandb/
 .runtime/
 *.tar.gz
+.git
