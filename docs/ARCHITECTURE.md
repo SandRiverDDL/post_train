@@ -22,6 +22,7 @@
 - 打印摘要日志
 - 结果落盘
 - 按稳定工作流提供少量专名入口；评测数据准备统一收口到 `prepare_eval_data.py`
+- 实验 workflow 入口只做单轮编排，不直接实现训练或评测细节
 
 不负责：
 
@@ -91,6 +92,10 @@
   - TRL `GRPOTrainer` 封装
   - preflight 检查、4bit + PEFT 加载
   - 关键 wandb 指标白名单与平滑上报
+- `workflow.py`
+  - 单轮实验编排层
+  - 训练 -> dev 选 best checkpoint -> benchmark -> baseline 对比
+  - 失败摘要与 workflow summary 落盘
 - `grpo_data.py`
   - `rd211` 数学 RL 数据过滤
   - 与 anchor 题池按比例混合
@@ -251,6 +256,27 @@ rd211 + anchor
 -> reward 组装
 -> `TRL GRPOTrainer`
 -> 模型导出
+
+### 6. 单轮实验 Workflow
+
+输入：
+
+- 一份训练配置
+- 一份评测配置
+- 固定 dev 集与 benchmark 任务名
+
+输出：
+
+- 训练产物目录
+- `dev_eval/best_checkpoint.json`
+- benchmark 结果
+- `workflow_summary.json`
+
+说明：
+
+- 当前 v1 只支持 `GRPO`
+- workflow 层不复写训练与评测实现，只复用已有库层能力
+- baseline 默认优先复用已有 benchmark 结果，缺失时再补评
 
 ## 评测设计
 

@@ -279,16 +279,14 @@ class WandbSmoothingCallback:
         self.enabled = cfg.report_to == "wandb"
         self._wandb = None
         self.whitelist = {
-            "reward/correctness",
-            "reward/parse_penalty",
+            "reward",
+            "reward_std",
             "completions/mean_length",
             "clip_ratio/region_mean",
             "learning_rate",
         }
         self.debug_whitelist = {
             "loss",
-            "reward",
-            "reward_std",
             "frac_reward_zero_std",
             "completions/clipped_ratio",
             "entropy",
@@ -326,6 +324,8 @@ class WandbSmoothingCallback:
 
     def _should_log(self, key: str) -> bool:
         if key in self.whitelist:
+            return True
+        if key.startswith("reward/") or key.startswith("rewards/"):
             return True
         return self.cfg.wandb_debug_metrics and key in self.debug_whitelist
 

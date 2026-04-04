@@ -1,0 +1,19 @@
+extends: train_cheap.yaml
+output_dir: outputs/grpo_3090
+
+max_train_samples: 
+
+use_vllm: true
+vllm_mode: colocate
+vllm_gpu_memory_utilization: 0.4
+max_completion_length: 512
+
+epochs: 1.0
+batch_size: 4
+gradient_accumulation_steps: 8
+num_generations: 4
+
+beta: 0.01
+
+save_steps: 50
+save_total_limit: 10

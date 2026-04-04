@@ -320,11 +320,14 @@ class GRPOWandbTest(unittest.TestCase):
         cfg = load_grpo_train_config("configs/grpo/train_cheap.yaml")
         callback = WandbSmoothingCallback(cfg)
 
+        self.assertTrue(callback._should_log("reward"))
+        self.assertTrue(callback._should_log("reward_std"))
         self.assertTrue(callback._should_log("reward/correctness"))
         self.assertTrue(callback._should_log("reward/parse_penalty"))
+        self.assertTrue(callback._should_log("rewards/correctness_reward/mean"))
         self.assertTrue(callback._should_log("completions/mean_length"))
         self.assertFalse(callback._should_log("loss"))
-        self.assertFalse(callback._should_log("reward_std"))
+        self.assertFalse(callback._should_log("entropy"))
 
     def test_wandb_callback_can_enable_debug_metrics(self) -> None:
         cfg = load_grpo_train_config("configs/grpo/train_cheap.yaml")

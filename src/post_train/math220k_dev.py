@@ -10,7 +10,7 @@ from post_train.io import ensure_parent, write_jsonl
 from post_train.stage2_data import make_math220k_record, token_length, validate_sft_record
 
 DATASET_NAME = "qingy2024/OpenR1-Math-220k-Cleaned"
-DEFAULT_TOKENIZER_NAME = "/home/chy/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2"
+DEFAULT_TOKENIZER_NAME = "/home/fsw/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2"
 
 PROFILE_SPECS: dict[str, list[tuple[str, int, int, int]]] = {
     "main150": [

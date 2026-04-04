@@ -10,8 +10,8 @@
 - 当前 on-policy 内部实现已收口到 `src/post_train/on_policy/` 子包；顶层 `on_policy_loop.py` 与 `on_policy_query_strategy.py` 仅保留兼容导出
 - 当前实验摘要统一落到 `outputs/*/run_summary.json`，实验索引统一追加到 `experiments/registry.jsonl`
 - 当前实验汇总表 `experiments/summary.md` 以 `math500/gsm8k` 的 `avg_rank` 为主排序；缺 benchmark 的旧实验会单独落到 `Incomplete Runs`
-- 薄入口：`prepare_stage1_data.py`、`prepare_eval_data.py`、`check_sft_data.py`、`train_sft.py`、`eval_model.py`、`prepare_on_policy_sft_data.py`、`run_on_policy_loop.py`、`prepare_simpo_data.py`、`train_simpo.py`
-- 配置目录：`configs/eval/`、`configs/on_policy/`、`configs/stage1/`、`configs/stage2/`、`configs/simpo/`
+- 薄入口：`prepare_stage1_data.py`、`prepare_eval_data.py`、`check_sft_data.py`、`train_sft.py`、`eval_model.py`、`prepare_on_policy_sft_data.py`、`run_on_policy_loop.py`、`prepare_simpo_data.py`、`train_simpo.py`、`train_grpo.py`、`run_experiment_workflow.py`
+- 配置目录：`configs/eval/`、`configs/on_policy/`、`configs/stage1/`、`configs/stage2/`、`configs/simpo/`、`configs/grpo/`、`configs/workflow/`
 - 当前开发模型：`Qwen/Qwen2.5-Math-1.5B`
 - 当前 `stage1` 数据口径：`UWNSL/MATH_training_split_short_cot`，首版规模 `2000`
 - 当前保留一条独立 `stage1_mix_long` 实验线：`UWNSL/Mix-Long_long_0.2_short_0.8`
@@ -21,6 +21,7 @@
 - 当前评测结果目录口径：`outputs/eval/<模型路径>/<task>/result.json` 与 `raw.json`
 - 暂停中的候选路线：`docs/experiments/two-stage-sft-simpo.md`
 - 新增独立实验路线：`GRPO`，当前仍未升级为仓库主线
+- 新增单轮实验编排入口：`scripts/run_experiment_workflow.py`，当前 v1 只支持 `GRPO -> dev 选 best ckpt -> math500/gsm8k -> baseline 对比`
 
 ## 当前最重要的问题
 

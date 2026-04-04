@@ -3,4 +3,4 @@ correctness:
   weight: 1.0
 parse_penalty:
   enabled: true
-  weight: -0.5
+  weight: -0.1

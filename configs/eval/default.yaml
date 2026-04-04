@@ -1,9 +1,9 @@
-model_name: Qwen/Qwen2.5-Math-1.5B
+model_name: /home/fsw/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
 output_dir: outputs/eval
 backend: vllm
 attn_implementation: sdpa
-batch_size: 6
-max_new_tokens: 1536
+batch_size: 16
+max_new_tokens: 1024
 max_seq_length: 2048
 device: cuda
 # VLLM

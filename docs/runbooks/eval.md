@@ -17,10 +17,8 @@
   --config configs/eval/default.yaml \
   --model outputs/stage2_sft/checkpoint-75 \
   --tasks gsm8k \
-  --batch-size 6 \
-  --max-lora-rank 32 \
-  --max-new-tokens 512 \
-  --limit 200
+  --batch-size 16 \
+  --max-new-tokens 512
 ```
 
 按单数据集临时覆盖：

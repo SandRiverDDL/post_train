@@ -14,7 +14,7 @@ target_pair_count: 150
 pilot_pair_count: 150
 
 generation_model: outputs/stage1_sft/checkpoint-50
-base_model_name: /home/chy/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
+base_model_name: /home/fsw/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
 max_model_length: 2048
 gpu_memory_utilization: 0.7
 max_lora_rank: 16

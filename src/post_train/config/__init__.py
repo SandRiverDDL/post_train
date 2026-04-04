@@ -10,6 +10,7 @@ from .stage1 import Stage1Math220kDataConfig, Stage1RSRCandidatesConfig, Stage1R
 from .sft import SFTTrainConfig
 from .simpo import SimPOConfig, SimPODataConfig
 from .stage2 import Stage2DataConfig, Stage2HendrycksLongDataConfig, Stage2MixLongDataConfig
+from .workflow import WorkflowConfig
 
 
 def load_sft_config(path: str | Path) -> SFTTrainConfig:
@@ -72,6 +73,10 @@ def load_stage2_hendrycks_long_data_config(path: str | Path) -> Stage2HendrycksL
     return Stage2HendrycksLongDataConfig.model_validate(load_yaml_config(path))
 
 
+def load_workflow_config(path: str | Path) -> WorkflowConfig:
+    return WorkflowConfig.model_validate(load_yaml_config(path))
+
+
 __all__ = [
     "EvalConfig",
     "EvalTaskConfig",
@@ -89,6 +94,7 @@ __all__ = [
     "Stage2DataConfig",
     "Stage2HendrycksLongDataConfig",
     "Stage2MixLongDataConfig",
+    "WorkflowConfig",
     "load_eval_config",
     "load_grpo_data_config",
     "load_grpo_reward_config",
@@ -104,5 +110,6 @@ __all__ = [
     "load_stage2_data_config",
     "load_stage2_hendrycks_long_data_config",
     "load_stage2_mix_long_data_config",
+    "load_workflow_config",
     "load_yaml_config",
 ]

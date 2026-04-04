@@ -7,8 +7,8 @@ small_teacher_split: train
 large_teacher_dataset: UWNSL/MATH_training_split_distill_large_teacher
 large_teacher_split: train
 
-student_model_name: /home/chy/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
-tokenizer_name: /home/chy/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
+student_model_name: /home/fsw/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
+tokenizer_name: /home/fsw/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
 
 output_path: data/stage1/rsr/candidates.jsonl
 report_path: data/stage1/rsr/candidates.report.json
