@@ -83,13 +83,13 @@
     - 空余显存阈值判空
     - 已有 server 探活与复用
     - metadata 记录与安全清理
-  - 顶层 `grpo_server.py`、`grpo_data.py`、`grpo_rewards.py`、`grpo_runtime.py` 只保留兼容导出
+  - 旧的顶层 `grpo_*` 兼容导出已删除，项目内入口直接依赖 `post_train.grpo.*`
 - `datasets/`
   - 按数据准备工作流收口 `stage1_math220k`、`stage2`、`stage2_hendrycks_long`、`stage2_mix_long`、`math220k_dev`、`aime`、`simpo`
-  - 顶层旧 `*_data.py` / `aime_eval.py` / `math220k_dev.py` 只保留兼容导出
+  - 旧的顶层 `*_data.py` / `aime_eval.py` / `math220k_dev.py` 兼容导出已删除
 - `on_policy/`
   - on-policy loop、query strategy、数据构造与 trainset 构造统一收口到子包
-  - 顶层 `on_policy_data.py`、`on_policy_query_strategy.py`、`on_policy_trainset.py` 只保留兼容导出
+  - 旧的顶层 `on_policy_*` 兼容导出已删除，项目内入口直接依赖 `post_train.on_policy.*`
 - `workflow.py`
   - 单轮实验编排层
   - 训练 -> dev 选 best checkpoint -> benchmark -> baseline 对比

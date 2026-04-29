@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.config import load_on_policy_loop_config
 from post_train.experiments import register_on_policy_loop_run
-from post_train.on_policy_loop import run_on_policy_loop
+from post_train.on_policy.loop_service import run_on_policy_loop
 
 
 def parse_args() -> argparse.Namespace:

@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.config import load_simpo_data_config
-from post_train.simpo_data import prepare_simpo_dataset
+from post_train.datasets.simpo import prepare_simpo_dataset
 
 
 def parse_args() -> argparse.Namespace:

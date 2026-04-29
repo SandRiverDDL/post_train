@@ -15,16 +15,15 @@ from post_train.config import (
     load_on_policy_loop_config,
     load_sft_config,
 )
-from post_train.on_policy_data import InsufficientRetainedSamplesError
-from post_train.on_policy_loop import (
-    build_query_sampler_state,
-    sample_round_queries,
+from post_train.on_policy.data import InsufficientRetainedSamplesError
+from post_train.on_policy.loop_paths import (
     build_round_data_config,
     build_round_name,
     build_round_paths,
     build_round_train_config,
-    run_on_policy_loop,
 )
+from post_train.on_policy.loop_service import run_on_policy_loop
+from post_train.on_policy.strategy_common import build_query_sampler_state, sample_round_queries
 
 
 class OnPolicyLoopTest(unittest.TestCase):

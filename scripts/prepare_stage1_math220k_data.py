@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.config import load_stage1_math220k_data_config
-from post_train.stage1_math220k_data import prepare_stage1_math220k_dataset
+from post_train.datasets.stage1_math220k import prepare_stage1_math220k_dataset
 
 
 def parse_args() -> argparse.Namespace:

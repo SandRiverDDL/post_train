@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.config import load_grpo_data_config
-from post_train.grpo_data import build_grpo_dataset
+from post_train.grpo.data import build_grpo_dataset
 
 
 def parse_args() -> argparse.Namespace:

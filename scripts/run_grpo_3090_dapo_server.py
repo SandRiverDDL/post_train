@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from post_train.grpo_server import run_grpo_with_vllm_server_on_gpus
+from post_train.grpo.server import run_grpo_with_vllm_server_on_gpus
 
 
 def parse_gpu_list(value: str) -> list[int]:

@@ -8,8 +8,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from post_train.on_policy_query_strategy import build_query_sampler_state
-from post_train.on_policy_trainset import build_mixed_plus_anchor_dataset
+from post_train.on_policy.query_strategy import build_query_sampler_state
+from post_train.on_policy.trainset import build_mixed_plus_anchor_dataset
 
 
 class OnPolicyTrainsetTest(unittest.TestCase):

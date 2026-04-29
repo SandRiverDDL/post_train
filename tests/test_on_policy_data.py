@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.config import load_on_policy_data_config
 from post_train.io import read_jsonl
-from post_train.on_policy_data import (
+from post_train.on_policy.data import (
     SELECTOR_MIXED_ONLY,
     build_query_pool,
     build_retained_sft_dataset,

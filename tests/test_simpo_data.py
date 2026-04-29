@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.config import load_simpo_data_config
-from post_train.simpo_data import build_pilot_pairs, build_preference_pairs, build_query_pool
+from post_train.datasets.simpo import build_pilot_pairs, build_preference_pairs, build_query_pool
 
 
 class SimPODataTest(unittest.TestCase):

@@ -9,7 +9,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from post_train.math220k_dev import (
+from post_train.datasets.math220k_dev import (
     default_output_path,
     prepare_math220k_dev,
     profile_names,

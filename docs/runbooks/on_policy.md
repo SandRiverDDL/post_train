@@ -6,7 +6,7 @@
 
 - `scripts/run_on_policy_loop.py` 仍是唯一自动循环入口
 - 内部实现已经拆到 `src/post_train/on_policy/` 子包
-- 顶层 `on_policy_loop.py` 与 `on_policy_query_strategy.py` 现在只作为兼容导出层保留
+- 旧的顶层 on-policy 兼容导出已删除，脚本入口直接调用子包实现
 
 ## 单轮数据准备
 

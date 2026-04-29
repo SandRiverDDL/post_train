@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.config import load_stage2_mix_long_data_config
-from post_train.stage2_mix_long_data import prepare_stage2_mix_long_dataset
+from post_train.datasets.stage2_mix_long import prepare_stage2_mix_long_dataset
 
 
 def parse_args() -> argparse.Namespace:

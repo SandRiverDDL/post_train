@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from post_train.on_policy_query_strategy import (
+from post_train.on_policy.query_strategy import (
     MIXED_SOURCE_CANDIDATE,
     MIXED_SOURCE_RANDOM,
     build_candidate_random_query_strategy,

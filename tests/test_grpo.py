@@ -23,11 +23,11 @@ from post_train.grpo import (
     collect_model_dtype_report,
     preflight_check,
 )
-from post_train.grpo_data import build_grpo_dataset, load_grpo_dataset
-from post_train.grpo_data import select_grpo_train_subset
-from post_train.grpo_runtime import GRPO_VLLM_SERVER_BASE_URL_ENV, apply_grpo_runtime_env_overrides
-from post_train.grpo_server import run_grpo_with_vllm_server_on_gpus, select_grpo_gpu_pair
-from post_train.grpo_rewards import QuestionStatsRecorder, build_reward_functions
+from post_train.grpo.data import build_grpo_dataset, load_grpo_dataset
+from post_train.grpo.data import select_grpo_train_subset
+from post_train.grpo.rewards import QuestionStatsRecorder, build_reward_functions
+from post_train.grpo.runtime import GRPO_VLLM_SERVER_BASE_URL_ENV, apply_grpo_runtime_env_overrides
+from post_train.grpo.server import run_grpo_with_vllm_server_on_gpus, select_grpo_gpu_pair
 
 
 def _write_tmp_grpo_jsonl(rows: list[dict]) -> Path:

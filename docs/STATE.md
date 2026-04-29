@@ -14,7 +14,7 @@
 - 当前 `GRPO` 基础起点：`outputs/stage1_mix_long_sft/checkpoint-300`
 - 当前 `GRPO` 训练数据：`data/grpo/train.jsonl`
 - 当前 `GRPO` 双卡入口：`scripts/run_grpo_3090_dapo_server.py`
-- 当前 `GRPO` 双卡编排：`src/post_train/grpo_server.py`
+- 当前 `GRPO` 双卡编排：`src/post_train/grpo/server.py`
 - 当前单轮实验编排入口：`scripts/run_experiment_workflow.py`
 - 当前评测结果目录口径：`outputs/eval/<模型路径>/<task>/result.json` 与 `raw.json`
 - 当前 checkpoint 选择输出口径：`<train_output_dir>/dev_eval/dev_ranking.json` 与 `best_checkpoint.json`

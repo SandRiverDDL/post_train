@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.config import load_stage2_data_config
-from post_train.stage2_data import (
+from post_train.datasets.stage2 import (
     assign_selection_pool,
     make_math220k_record,
     normalize_stage2_solution,

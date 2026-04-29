@@ -9,14 +9,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from post_train.aime_eval import prepare_aime_eval_artifact, write_aime_eval_artifact
+from post_train.datasets.aime import prepare_aime_eval_artifact, write_aime_eval_artifact
 from post_train.data import (
     prepare_benchmark_artifact,
     prepare_stratified_math500_dev_artifact,
     preview_rows,
 )
 from post_train.io import ensure_parent, write_jsonl
-from post_train.math220k_dev import (
+from post_train.datasets.math220k_dev import (
     DATASET_NAME,
     DEFAULT_TOKENIZER_NAME,
     default_output_path,

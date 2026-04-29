@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.config import load_on_policy_data_config
-from post_train.on_policy_data import prepare_on_policy_sft_dataset
+from post_train.on_policy.data import prepare_on_policy_sft_dataset
 
 
 def parse_args() -> argparse.Namespace:

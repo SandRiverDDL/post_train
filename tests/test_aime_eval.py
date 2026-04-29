@@ -8,7 +8,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from post_train.aime_eval import (
+from post_train.datasets.aime import (
     prepare_aime_eval_artifact,
     resolve_aime_dataset,
 )

@@ -17,7 +17,7 @@ from post_train.config import Stage1RSRCandidatesConfig, Stage1RSRSelectConfig
 from post_train.data import load_dataset_rows, make_sft_record, summarize_sft_dataset
 from post_train.io import ensure_parent, read_jsonl, write_jsonl
 from post_train.prompts import build_sft_prompt
-from post_train.stage2_data import validate_sft_record
+from post_train.datasets.stage2 import validate_sft_record
 
 SOURCE_ORDER = ("large", "small", "short", "long")
 SOURCE_DATASET_FIELDS = {
