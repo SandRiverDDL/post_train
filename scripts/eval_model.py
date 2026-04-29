@@ -11,9 +11,10 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.config import load_eval_config
 from post_train.eval import (
+    EvalRunner,
+    EvalRunOverrides,
     preview_logged_samples,
     resolve_eval_tasks,
-    run_eval_task,
     summarize_metrics_for_console,
 )
 
@@ -55,18 +56,18 @@ def main() -> None:
     )
     if backend != "vllm":
         raise ValueError("当前评测只支持 backend=vllm。")
-    for task in tasks:
-        run_result = run_eval_task(
-            model_name=model_name,
-            task=task,
-            eval_cfg=cfg.model_copy(update={"backend": backend}),
+    eval_runner = EvalRunner(cfg.model_copy(update={"backend": backend}), model_name=model_name)
+    run_results = eval_runner.run_tasks(
+        tasks,
+        overrides=EvalRunOverrides(
             batch_size=batch_size,
             max_new_tokens=max_new_tokens,
             limit=args.limit,
             output_dir=cfg.output_dir,
             max_lora_rank=max_lora_rank,
-        )
-        raw_result = run_result["raw_result"]
+        ),
+    )
+    for run_result in run_results:
         result = run_result["result"]
         preview = preview_logged_samples(result)
         if preview:

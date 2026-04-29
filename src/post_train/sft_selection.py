@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from post_train.config import EvalConfig, EvalTaskConfig
-from post_train.eval import VLLMRunner, resolve_model_args, run_eval_task
+from post_train.eval import EvalRunner, EvalRunOverrides, VLLMRunner, resolve_model_args
 
 CHECKPOINT_RE = re.compile(r"checkpoint-(\d+)$")
 
@@ -42,18 +42,18 @@ def evaluate_checkpoint(
     runner: VLLMRunner | None = None,
 ) -> dict[str, Any]:
     checkpoint_dir = Path(checkpoint_path)
-    run_result = run_eval_task(
-        model_name=str(checkpoint_dir),
-        task=EvalTaskConfig(
+    eval_runner = EvalRunner(eval_cfg, model_name=str(checkpoint_dir), backend_runner=runner)
+    run_result = eval_runner.run_task(
+        EvalTaskConfig(
             name=Path(dataset_path).stem.replace("-", "_"),
             dataset_path=Path(dataset_path),
         ),
-        eval_cfg=eval_cfg,
-        batch_size=batch_size,
-        max_new_tokens=max_new_tokens,
-        limit=limit,
-        output_dir=Path(output_dir) / checkpoint_dir.name,
-        runner=runner,
+        overrides=EvalRunOverrides(
+            batch_size=batch_size,
+            max_new_tokens=max_new_tokens,
+            limit=limit,
+            output_dir=Path(output_dir) / checkpoint_dir.name,
+        ),
     )
     result = run_result["result"]
     return {

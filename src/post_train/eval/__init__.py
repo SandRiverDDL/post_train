@@ -13,13 +13,19 @@ from .metrics import (
     result_from_vllm_raw_logs,
     summarize_metrics_for_console,
 )
+from .model import describe_model_resolution, resolve_model_args
+from .runner import EvalRunner, EvalRunOverrides
 from .service import resolve_eval_tasks, run_eval_task
-from .vllm import VLLMRunner, build_task_name, resolve_model_args, run_vllm_raw_eval
+from .tasks import build_task_name
+from .vllm import VLLMRunner, run_vllm_raw_eval
 
 __all__ = [
     "build_eval_result",
     "build_model_output_path",
     "build_task_name",
+    "describe_model_resolution",
+    "EvalRunner",
+    "EvalRunOverrides",
     "preview_logged_samples",
     "rate_stderr",
     "resolve_eval_tasks",

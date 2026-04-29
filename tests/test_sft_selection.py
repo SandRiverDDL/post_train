@@ -113,19 +113,29 @@ class SFTSelectionTest(unittest.TestCase):
             checkpoint_dir = Path(tmp_dir) / "checkpoint-10"
             checkpoint_dir.mkdir()
             sentinel_runner = object()
-            with patch(
-                "post_train.sft_selection.run_eval_task",
-                return_value={
-                    "result": {"metrics": {"normalized_accuracy": 0.25}},
-                    "result_path": "/tmp/result.json",
-                    "raw_result_path": "/tmp/raw.json",
-                    "model_resolution": {
-                        "enable_lora": True,
-                        "lora_local_path": str(checkpoint_dir),
-                        "pretrained": "/tmp/base",
-                    },
-                },
-            ) as mock_run_eval:
+            captured: dict[str, object] = {}
+
+            class FakeEvalRunner:
+                def __init__(self, eval_cfg, *, model_name=None, backend_runner=None) -> None:
+                    captured["eval_cfg"] = eval_cfg
+                    captured["model_name"] = model_name
+                    captured["backend_runner"] = backend_runner
+
+                def run_task(self, task, overrides=None):
+                    captured["task"] = task
+                    captured["overrides"] = overrides
+                    return {
+                        "result": {"metrics": {"normalized_accuracy": 0.25}},
+                        "result_path": "/tmp/result.json",
+                        "raw_result_path": "/tmp/raw.json",
+                        "model_resolution": {
+                            "enable_lora": True,
+                            "lora_local_path": str(checkpoint_dir),
+                            "pretrained": "/tmp/base",
+                        },
+                    }
+
+            with patch("post_train.sft_selection.EvalRunner", FakeEvalRunner):
                 record = evaluate_checkpoint(
                     checkpoint_path=checkpoint_dir,
                     dataset_path=Path(tmp_dir) / "dev.jsonl",
@@ -139,7 +149,7 @@ class SFTSelectionTest(unittest.TestCase):
 
         self.assertTrue(record["model_resolution"]["enable_lora"])
         self.assertEqual(record["model_resolution"]["pretrained"], "/tmp/base")
-        self.assertIs(mock_run_eval.call_args.kwargs["runner"], sentinel_runner)
+        self.assertIs(captured["backend_runner"], sentinel_runner)
 
     def test_run_checkpoint_selection_reuses_single_runner(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

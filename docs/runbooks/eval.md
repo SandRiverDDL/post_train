@@ -10,6 +10,8 @@
 
 默认固定走 `vllm` 后端上的本地评测链路。
 
+当前内部统一由 `post_train.eval.EvalRunner` 编排；CLI 参数、输出路径和 `result.json/raw.json` 格式保持兼容。
+
 ## 常用覆盖
 
 ```bash
@@ -60,5 +62,6 @@
 - 评测 LoRA adapter 时，`max_lora_rank` 必须大于等于训练时的 `lora_rank`
 - 结果默认落到 `outputs/eval/<模型路径>/<task>/result.json` 与 `raw.json`
 - 终端默认只打印核心字段；完整 metrics 仍保留在结果 JSON 中
+- checkpoint selection 会复用同一个 vLLM backend runner，只切换 LoRA adapter
 - `AIME24/AIME25` 默认不在 `configs/eval/default.yaml` 里，需要用单独配置
 - `AIME24/AIME25` 当前通过同一条评测链路支持每题多采样与 `pass@1`

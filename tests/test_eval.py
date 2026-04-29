@@ -15,6 +15,8 @@ sys.path.insert(0, str(ROOT / "src"))
 from post_train.config import load_eval_config
 from post_train.eval import (
     build_eval_result,
+    EvalRunner,
+    EvalRunOverrides,
     rate_stderr,
     resolve_eval_tasks,
     resolve_task_output_paths,
@@ -328,8 +330,8 @@ class EvalPipelineTest(unittest.TestCase):
             )
             cfg = load_eval_config(config_path)
 
-            with patch("post_train.eval.service.run_vllm_raw_eval", return_value={"samples": {"toy": []}, "timing": {"total_seconds": 1.0}}), patch(
-                "post_train.eval.service.result_from_vllm_raw_logs",
+            with patch("post_train.eval.runner.run_vllm_raw_eval", return_value={"samples": {"toy": []}, "timing": {"total_seconds": 1.0}}), patch(
+                "post_train.eval.runner.result_from_vllm_raw_logs",
                 return_value={"metrics": {"normalized_accuracy": 0.0}},
             ):
                 run_result = run_eval_task(
@@ -346,6 +348,46 @@ class EvalPipelineTest(unittest.TestCase):
         self.assertTrue(run_result["model_resolution"]["enable_lora"])
         self.assertEqual(run_result["model_resolution"]["pretrained"], "/tmp/base")
         self.assertEqual(run_result["model_resolution"]["lora_local_path"], str(adapter_dir))
+
+    def test_eval_runner_run_task_matches_run_eval_task_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            dataset_path = tmp_path / "toy.jsonl"
+            dataset_path.write_text(
+                json.dumps({"id": "1", "question": "1+1=?", "final_answer": "2"}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            config_path = tmp_path / "eval.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "model_name: /tmp/base",
+                        f"dataset_path: {dataset_path}",
+                        f"output_dir: {tmp_path / 'outputs'}",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            cfg = load_eval_config(config_path)
+
+            with patch("post_train.eval.runner.run_vllm_raw_eval", return_value={"samples": {"toy": []}, "timing": {"total_seconds": 1.0}}), patch(
+                "post_train.eval.runner.result_from_vllm_raw_logs",
+                return_value={"metrics": {"normalized_accuracy": 0.0}},
+            ):
+                run_result = EvalRunner(cfg, model_name="/tmp/base").run_task(
+                    cfg.tasks[0],
+                    overrides=EvalRunOverrides(
+                        batch_size=2,
+                        max_new_tokens=64,
+                        limit=1,
+                        output_dir=tmp_path / "custom_outputs",
+                        max_lora_rank=32,
+                    ),
+                )
+
+        self.assertEqual(set(run_result), {"task_name", "raw_result", "result", "result_path", "raw_result_path", "model_resolution"})
+        self.assertEqual(run_result["task_name"], "toy")
+        self.assertIn("custom_outputs", run_result["result_path"])
 
     def test_result_from_vllm_raw_logs_matches_current_result_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
