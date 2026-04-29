@@ -50,48 +50,51 @@
   - 按工作流拆分配置 schema 与 loader
   - 对外统一导出 `load_*_config(...)`
 - `eval/`
-  - `vllm_raw` 评测编排
-  - 多任务结果汇总
+  - `EvalRunner` 负责评测主编排与多任务执行
+  - `tasks.py` 负责任务选择与临时 dataset 任务名推导
+  - `model.py` 负责 base / LoRA adapter 解析与 `model_resolution`
+  - `vllm.py` 只负责 vLLM backend runner 与 raw generation
+  - `metrics.py` 负责 raw 结果到 metrics / predictions 的转换
   - 输出按模型路径与任务名分目录落盘
   - 当前已补齐 `model_resolution` 诊断，显式记录：
     - `pretrained`
     - `enable_lora`
     - `lora_local_path`
+  - `service.py` 保留旧 `run_eval_task(...)` facade，供历史调用方兼容
 - `sft_selection.py`
   - checkpoint 扫描
   - dev 批量评测
   - best checkpoint 选择
   - 当前会把 `model_resolution` 一起写入 ranking / best summary
-- `grpo.py`
-  - TRL `GRPOTrainer` 封装
-  - preflight 检查、PEFT 加载
+- `grpo/`
+  - `train.py` 封装 TRL `GRPOTrainer` 主流程
+  - `model_loading.py` 负责 PEFT 加载、量化参数与 dtype 对齐
+  - `training_args.py` 负责 `GRPOConfig`
+  - `diagnostics.py` 负责 adapter / dtype 诊断
+  - `callbacks.py` 负责 W&B callback
+  - `server.py` 负责双卡 `vLLM server + trainer` 编排
+  - `data.py` 与 `rewards.py` 分别负责 GRPO 数据与 reward
   - 当前已补齐 `grpo.adapter.*` 诊断，显式记录：
     - 是否从 adapter checkpoint 继续训练
     - LoRA 参数数量
     - adapter 对应底模路径
-  - wandb 指标白名单与主面板控制
-- `grpo_server.py`
-  - 双卡 `1训1推` 启动与 GPU 对选择
-  - `vLLM server` 生命周期管理
   - 当前已支持：
     - 优先 `6/7`
     - 空余显存阈值判空
     - 已有 server 探活与复用
     - metadata 记录与安全清理
-- `grpo_data.py`
-  - `rd211` 数学 RL 数据过滤
-  - 与 anchor 题池按比例混合
-  - 统一 exact dedup
-- `grpo_rewards.py`
-  - 正确性 reward
-  - parse 失败惩罚
-  - soft overlong 惩罚
-  - reward 组件装配
+  - 顶层 `grpo_server.py`、`grpo_data.py`、`grpo_rewards.py`、`grpo_runtime.py` 只保留兼容导出
+- `datasets/`
+  - 按数据准备工作流收口 `stage1_math220k`、`stage2`、`stage2_hendrycks_long`、`stage2_mix_long`、`math220k_dev`、`aime`、`simpo`
+  - 顶层旧 `*_data.py` / `aime_eval.py` / `math220k_dev.py` 只保留兼容导出
+- `on_policy/`
+  - on-policy loop、query strategy、数据构造与 trainset 构造统一收口到子包
+  - 顶层 `on_policy_data.py`、`on_policy_query_strategy.py`、`on_policy_trainset.py` 只保留兼容导出
 - `workflow.py`
   - 单轮实验编排层
   - 训练 -> dev 选 best checkpoint -> benchmark -> baseline 对比
   - workflow summary / failure summary 落盘
-- `on_policy/`、`simpo.py`、`simpo_data.py`、`stage2_*`
+- `on_policy/`、`simpo.py`、`datasets/simpo.py`、`datasets/stage2_*`
   - 保留为旧路线或候选路线模块，不是当前主线
 
 ## 主链路
