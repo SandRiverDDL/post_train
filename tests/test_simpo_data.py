@@ -62,7 +62,7 @@ class SimPODataTest(unittest.TestCase):
                 {"id": "2", "problem": "q2", "answer": "2"},
             ]
 
-            with patch("post_train.simpo_data.load_dataset_rows", return_value=raw_rows):
+            with patch("post_train.datasets.simpo.load_dataset_rows", return_value=raw_rows):
                 query_rows, report = build_query_pool(cfg)
 
         self.assertEqual(report["excluded_ids"], 1)

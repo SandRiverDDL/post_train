@@ -77,7 +77,7 @@ class Stage2MixLongDataTest(unittest.TestCase):
                 },
             ]
 
-            with patch("post_train.stage2_mix_long_data.load_dataset_rows", return_value=dataset_rows):
+            with patch("post_train.datasets.stage2_mix_long.load_dataset_rows", return_value=dataset_rows):
                 with patch("transformers.AutoTokenizer.from_pretrained", return_value=FakeTokenizer()):
                     result = prepare_stage2_mix_long_dataset(cfg)
 
@@ -117,7 +117,7 @@ class Stage2MixLongDataTest(unittest.TestCase):
                 {"id": "c", "question": "q3", "solution": "c", "final_answer": "3"},
             ]
 
-            with patch("post_train.stage2_mix_long_data.load_dataset_rows", return_value=dataset_rows):
+            with patch("post_train.datasets.stage2_mix_long.load_dataset_rows", return_value=dataset_rows):
                 with patch("transformers.AutoTokenizer.from_pretrained", return_value=FakeTokenizer()):
                     result = prepare_stage2_mix_long_dataset(cfg)
 

@@ -28,7 +28,7 @@ class AimeEvalTest(unittest.TestCase):
 
     def test_prepare_aime_eval_artifact_supports_aime24_and_aime25(self) -> None:
         raw_rows = [{"id": "a-1", "problem": "Compute 1+1.", "answer": "2"}]
-        with patch("post_train.aime_eval.prepare_benchmark_artifact", return_value=[{"id": "a-1"}]) as mock_prepare:
+        with patch("post_train.datasets.aime.prepare_benchmark_artifact", return_value=[{"id": "a-1"}]) as mock_prepare:
             rows24 = prepare_aime_eval_artifact(year=24)
             rows25 = prepare_aime_eval_artifact(year=25)
 

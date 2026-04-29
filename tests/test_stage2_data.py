@@ -189,7 +189,7 @@ class Stage2DataTest(unittest.TestCase):
                 },
             ]
 
-            with patch("post_train.stage2_data.load_dataset_rows", return_value=dataset_rows):
+            with patch("post_train.datasets.stage2.load_dataset_rows", return_value=dataset_rows):
                 with patch("transformers.AutoTokenizer.from_pretrained", return_value=FakeTokenizer()):
                     result = prepare_stage2_dataset(cfg)
 

@@ -78,7 +78,7 @@ class Math220KDevTest(unittest.TestCase):
                 }
             )
 
-            with patch("post_train.math220k_dev.load_dataset_rows", return_value=dataset_rows):
+            with patch("post_train.datasets.math220k_dev.load_dataset_rows", return_value=dataset_rows):
                 with patch("transformers.AutoTokenizer.from_pretrained", return_value=FakeTokenizer()):
                     result = prepare_math220k_dev(
                         profile="main150",
@@ -111,7 +111,7 @@ class Math220KDevTest(unittest.TestCase):
                 for index in range(200)
             ]
 
-            with patch("post_train.math220k_dev.load_dataset_rows", return_value=dataset_rows):
+            with patch("post_train.datasets.math220k_dev.load_dataset_rows", return_value=dataset_rows):
                 with patch("transformers.AutoTokenizer.from_pretrained", return_value=FakeTokenizer()):
                     result = prepare_math220k_dev(
                         profile="short150",

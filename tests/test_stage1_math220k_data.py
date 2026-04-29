@@ -92,7 +92,7 @@ class Stage1Math220kDataTest(unittest.TestCase):
                 },
             ]
 
-            with patch("post_train.stage1_math220k_data.load_dataset_rows", return_value=dataset_rows):
+            with patch("post_train.datasets.stage1_math220k.load_dataset_rows", return_value=dataset_rows):
                 with patch("transformers.AutoTokenizer.from_pretrained", return_value=FakeTokenizer()):
                     result = prepare_stage1_math220k_dataset(cfg)
 
@@ -130,7 +130,7 @@ class Stage1Math220kDataTest(unittest.TestCase):
                 }
             ]
 
-            with patch("post_train.stage1_math220k_data.load_dataset_rows", return_value=dataset_rows):
+            with patch("post_train.datasets.stage1_math220k.load_dataset_rows", return_value=dataset_rows):
                 with patch("transformers.AutoTokenizer.from_pretrained", return_value=FakeTokenizer()):
                     with self.assertRaisesRegex(ValueError, "样本不足"):
                         prepare_stage1_math220k_dataset(cfg)

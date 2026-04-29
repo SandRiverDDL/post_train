@@ -102,7 +102,7 @@ class Stage2HendrycksLongDataTest(unittest.TestCase):
                     return long_rows
                 raise AssertionError(f"unexpected dataset {dataset_name}")
 
-            with patch("post_train.stage2_hendrycks_long_data.load_dataset_rows", side_effect=fake_load_dataset_rows):
+            with patch("post_train.datasets.stage2_hendrycks_long.load_dataset_rows", side_effect=fake_load_dataset_rows):
                 with patch("transformers.AutoTokenizer.from_pretrained", return_value=FakeTokenizer()):
                     result = prepare_stage2_hendrycks_long_dataset(cfg)
 
