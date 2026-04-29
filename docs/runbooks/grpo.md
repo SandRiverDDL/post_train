@@ -40,6 +40,16 @@
 .venv/bin/python scripts/run_grpo_3090_dapo_server.py
 ```
 
+指定 trainer / vLLM GPU 与端口：
+
+```bash
+.venv/bin/python scripts/run_grpo_3090_dapo_server.py \
+  --config configs/grpo/train_3090_dapo_server_resume766.yaml \
+  --trainer-gpu 1 \
+  --vllm-gpu 2 \
+  --vllm-port 8001
+```
+
 当前双卡默认行为：
 
 - trainer 与 `vLLM server` 分卡运行
@@ -48,6 +58,8 @@
   - `vLLM server` `GPU 7`
 - 若 `6/7` 空余显存不足，再回退到其他空闲卡对
 - 已有健康且匹配的 `vLLM server` 会优先复用，不重复冷启动
+- 使用 `--vllm-port` 时，wrapper 会把实际 `vLLM server` 地址通过 `GRPO_VLLM_SERVER_BASE_URL` 传给 trainer，避免 trainer 仍按 yaml 里的旧端口连接
+- 如果 `127.0.0.1:8000` 已被占用但 `/health/` 不可用，入口会直接报错；先用 `ss -ltnp 'sport = :8000'` 确认残留进程归属，再手动关闭
 
 当前 `DAPO-lite` 默认配置：
 
@@ -60,6 +72,20 @@
 - `max_completion_length: 768`
 - `soft_overlong.weight: 0.05`
 - `soft_overlong.cache_tokens: 192`
+
+题级统计：
+
+- 需要题级 rollout 摘要时，在训练配置中设置 `question_stats_path`
+- 当前记录本地 JSONL，不写入 W&B
+- 每行对应一次 reward batch 中的一道题，包含：
+  - `global_step`
+  - `question_id`
+  - `num_generations`
+  - `num_correct`
+  - `correct_rate`
+  - `parse_success_rate`
+  - completion 平均长度摘要
+- 该文件用于后续筛选 hard / easy / mixed 题，不保存完整回答文本
 
 注意：
 

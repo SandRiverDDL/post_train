@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -24,7 +25,9 @@ from post_train.grpo import (
 )
 from post_train.grpo_data import build_grpo_dataset, load_grpo_dataset
 from post_train.grpo_data import select_grpo_train_subset
-from post_train.grpo_rewards import build_reward_functions
+from post_train.grpo_runtime import GRPO_VLLM_SERVER_BASE_URL_ENV, apply_grpo_runtime_env_overrides
+from post_train.grpo_server import run_grpo_with_vllm_server_on_gpus, select_grpo_gpu_pair
+from post_train.grpo_rewards import QuestionStatsRecorder, build_reward_functions
 
 
 def _write_tmp_grpo_jsonl(rows: list[dict]) -> Path:
@@ -63,6 +66,17 @@ class GRPOConfigTest(unittest.TestCase):
         self.assertEqual(cfg.compute_dtype, "bfloat16")
         self.assertTrue(cfg.mask_truncated_completions)
         self.assertFalse(cfg.wandb_debug_metrics)
+        self.assertIsNone(cfg.question_stats_path)
+
+    def test_runtime_env_can_override_vllm_server_base_url(self) -> None:
+        cfg = load_grpo_train_config("configs/grpo/train_3090_dapo_server.yaml")
+
+        updated = apply_grpo_runtime_env_overrides(
+            cfg,
+            env={GRPO_VLLM_SERVER_BASE_URL_ENV: "http://127.0.0.1:8001"},
+        )
+
+        self.assertEqual(updated.vllm_server_base_url, "http://127.0.0.1:8001")
 
     def test_build_training_args_uses_dr_grpo_defaults(self) -> None:
         cfg = load_grpo_train_config("configs/grpo/train_cheap.yaml")
@@ -199,6 +213,35 @@ class GRPORewardTest(unittest.TestCase):
         self.assertEqual(correctness_reward(completions, final_answers), [1.0, 0.0])
         self.assertEqual(parse_penalty_reward(completions, final_answers), [0.0, -0.1])
 
+    def test_question_stats_recorder_writes_grouped_prompt_summary(self) -> None:
+        cfg = load_grpo_reward_config("configs/grpo/reward.yaml")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            stats_path = Path(tmp_dir) / "question_stats.jsonl"
+            recorder = QuestionStatsRecorder(stats_path)
+            reward_funcs = build_reward_functions(cfg, max_completion_length=768, stats_recorder=recorder)
+            correctness_reward = reward_funcs[0]
+
+            rewards = correctness_reward(
+                ["解答\n\\boxed{2}", "解答\n\\boxed{3}", "没有框起来的答案 4"],
+                ["2", "2", "4"],
+                id=["q1", "q1", "q2"],
+                question=["1+1?", "1+1?", "2+2?"],
+                completion_ids=[[1, 2, 3], [1, 2], [1]],
+            )
+            recorder.flush(global_step=12, epoch=0.5)
+            rows = [json.loads(line) for line in stats_path.read_text(encoding="utf-8").splitlines()]
+
+        self.assertEqual(rewards, [1.0, 0.0, 0.0])
+        self.assertEqual(len(rows), 2)
+        row_by_id = {row["question_id"]: row for row in rows}
+        self.assertEqual(row_by_id["q1"]["global_step"], 12)
+        self.assertEqual(row_by_id["q1"]["num_generations"], 2)
+        self.assertEqual(row_by_id["q1"]["num_correct"], 1)
+        self.assertEqual(row_by_id["q1"]["correct_rate"], 0.5)
+        self.assertEqual(row_by_id["q1"]["parse_success_rate"], 1.0)
+        self.assertEqual(row_by_id["q1"]["mean_completion_token_length"], 2.5)
+        self.assertEqual(row_by_id["q2"]["parse_success_rate"], 0.0)
+
 
 class GRPOPreflightTest(unittest.TestCase):
     def test_preflight_requires_gpu(self) -> None:
@@ -214,9 +257,102 @@ class GRPOPreflightTest(unittest.TestCase):
         def fake_version(name: str) -> str:
             return {"trl": "0.24.0", "vllm": "0.12.0"}[name]
 
-        with patch("torch.cuda.is_available", return_value=True), patch("post_train.grpo.metadata.version", side_effect=fake_version):
+        with patch("torch.cuda.is_available", return_value=True), patch("post_train.grpo.train.metadata.version", side_effect=fake_version):
             with self.assertRaisesRegex(RuntimeError, "只支持 vllm==0.10.2"):
                 preflight_check(cfg)
+
+    def test_forced_gpu_args_must_be_paired_and_distinct(self) -> None:
+        with self.assertRaisesRegex(ValueError, "必须同时指定"):
+            run_grpo_with_vllm_server_on_gpus("configs/grpo/train_cheap.yaml", trainer_gpu=4)
+        with self.assertRaisesRegex(ValueError, "不能和 vLLM GPU 重叠"):
+            run_grpo_with_vllm_server_on_gpus("configs/grpo/train_cheap.yaml", trainer_gpu=4, vllm_gpu=4)
+        with self.assertRaisesRegex(ValueError, "只能指定一个"):
+            run_grpo_with_vllm_server_on_gpus("configs/grpo/train_cheap.yaml", trainer_gpu=4, vllm_gpu=5, vllm_gpus=[5, 6])
+        with self.assertRaisesRegex(ValueError, "不能包含重复"):
+            run_grpo_with_vllm_server_on_gpus("configs/grpo/train_cheap.yaml", trainer_gpu=4, vllm_gpus=[5, 5])
+        with self.assertRaisesRegex(ValueError, "不能和 vLLM GPU 重叠"):
+            run_grpo_with_vllm_server_on_gpus("configs/grpo/train_cheap.yaml", trainer_gpu=4, vllm_gpus=[4, 5])
+
+    def test_gpu_selection_filters_high_gpu_utilization(self) -> None:
+        rows = [
+            (6, 1000, 24576, 80),
+            (7, 1000, 24576, 0),
+            (4, 1000, 24576, 0),
+        ]
+
+        with patch("post_train.grpo.gpu.query_gpu_status", return_value=rows):
+            pair = select_grpo_gpu_pair(
+                preferred_trainer_gpu=6,
+                preferred_vllm_gpu=7,
+                min_free_memory_mb=20 * 1024,
+                max_gpu_utilization=10,
+            )
+
+        self.assertEqual(pair, (4, 7))
+
+    def test_server_start_rejects_occupied_unhealthy_port(self) -> None:
+        with (
+            patch("post_train.grpo.server.health_check", return_value=False),
+            patch("post_train.grpo.server.port_is_open", return_value=True),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "已被占用"):
+                run_grpo_with_vllm_server_on_gpus(
+                    "configs/grpo/train_3090_dapo_server.yaml",
+                    trainer_gpu=1,
+                    vllm_gpus=[2, 4],
+                )
+
+    def test_server_start_can_override_vllm_port(self) -> None:
+        checked_ports: list[int] = []
+
+        def fake_port_is_open(host: str, port: int, timeout_seconds: float = 1.0) -> bool:
+            checked_ports.append(port)
+            return True
+
+        with (
+            patch("post_train.grpo.server.health_check", return_value=False),
+            patch("post_train.grpo.server.port_is_open", side_effect=fake_port_is_open),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "127.0.0.1:8001"):
+                run_grpo_with_vllm_server_on_gpus(
+                    "configs/grpo/train_3090_dapo_server.yaml",
+                    trainer_gpu=1,
+                    vllm_gpus=[2, 4],
+                    vllm_port=8001,
+                )
+
+        self.assertEqual(checked_ports, [8001])
+
+    def test_server_passes_resolved_vllm_url_to_trainer(self) -> None:
+        captured_env: dict[str, str] = {}
+
+        class Completed:
+            returncode = 0
+
+        def fake_run(cmd, *, env, check):
+            captured_env.update(env)
+            return Completed()
+
+        with (
+            patch("post_train.grpo.server.health_check", return_value=True),
+            patch(
+                "post_train.grpo.server.load_server_metadata",
+                return_value={"trainer_gpu": 1, "vllm_gpus": [2], "server_log": "server.log"},
+            ),
+            patch("post_train.grpo.server.metadata_matches", return_value=True),
+            patch("post_train.grpo.server.subprocess.run", side_effect=fake_run),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            returncode = run_grpo_with_vllm_server_on_gpus(
+                "configs/grpo/train_3090_dapo_server.yaml",
+                trainer_gpu=1,
+                vllm_gpus=[2],
+                vllm_port=8001,
+            )
+
+        self.assertEqual(returncode, 0)
+        self.assertEqual(captured_env["CUDA_VISIBLE_DEVICES"], "1")
+        self.assertEqual(captured_env[GRPO_VLLM_SERVER_BASE_URL_ENV], "http://127.0.0.1:8001")
 
     def test_preflight_allows_newer_trl_with_current_vllm(self) -> None:
         cfg = load_grpo_train_config("configs/grpo/train_3090.yaml")
@@ -224,7 +360,7 @@ class GRPOPreflightTest(unittest.TestCase):
         def fake_version(name: str) -> str:
             return {"trl": "0.25.1", "vllm": "0.12.0"}[name]
 
-        with patch("torch.cuda.is_available", return_value=True), patch("post_train.grpo.metadata.version", side_effect=fake_version):
+        with patch("torch.cuda.is_available", return_value=True), patch("post_train.grpo.train.metadata.version", side_effect=fake_version):
             preflight_check(cfg)
 
 

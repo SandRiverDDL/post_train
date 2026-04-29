@@ -106,3 +106,4 @@ class GRPOTrainConfig(BaseModel):
     wandb_run_name: str | None = None
     wandb_debug_metrics: bool = False
     wandb_smoothing_window: int = Field(default=5, ge=1)
+    question_stats_path: Path | None = None

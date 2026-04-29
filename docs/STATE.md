@@ -60,6 +60,7 @@
   - trainer 优先 `GPU 6`
   - `vLLM server` 优先 `GPU 7`
   - 若 `6/7` 空余显存不足，再回退到其他空闲卡对
+  - 指定 `--vllm-port` 时，wrapper 会同步覆盖 trainer 使用的 `vLLM server` 地址
 - 当前 DAPO-lite 配置：
   - `vllm_mode=server`
   - `loss_type=dapo`

@@ -1,0 +1,13 @@
+extends: train_3090_dapo_server.yaml
+
+model_name_or_path: outputs/grpo_3090_dapo_server/checkpoint-766
+output_dir: outputs/grpo_3090_dapo_server_resume766_lr7e7_ep2
+
+learning_rate: 7.0e-7
+epochs: 2.0
+
+save_steps: 75
+save_total_limit: 30
+vllm_gpu_memory_utilization: 0.9
+wandb_run_name: grpo_3090_dapo_server_resume766_lr7e7_ep2
+question_stats_path: outputs/grpo_3090_dapo_server_resume766_lr7e7_ep2/question_stats.jsonl
