@@ -1,13 +1,13 @@
 model_name: /home/fsw/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
 train_dataset: data/stage1/mix_long/train.jsonl
-output_dir: outputs/stage1_mix_long_sft
+output_dir: outputs/stage1_mix_long_sft_10ep_single_gpu
 seed: 42
-max_seq_length: 512
+max_seq_length: 768
 learning_rate: 1.0e-4
 
-epochs: 2
-batch_size: 4
-gradient_accumulation_steps: 8
+epochs: 10
+batch_size: 16
+gradient_accumulation_steps: 2
 lora_rank: 16
 lora_alpha: 32
 lora_dropout: 0.0

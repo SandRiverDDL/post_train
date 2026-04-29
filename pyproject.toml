@@ -13,7 +13,7 @@ dependencies = [
     "peft",
     "trl==0.26.2",
     "bitsandbytes>=0.45.0",
-    "unsloth",
+    "unsloth[cu128-torch290]",
     "pydantic>=2.12.5",
     "python-dotenv>=1.2.1",
     "math-verify[antlr4-13-2]>=0.9.0",
@@ -21,4 +21,9 @@ dependencies = [
     "wandb>=0.25.1",
     "omegaconf>=2.0.6",
     "vllm==0.11.2",
+    "unsloth-zoo>=2025.9.12",
 ]
+
+[[tool.uv.index]]
+url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
+default = true

@@ -94,7 +94,7 @@ RSR 默认规则：
 Mix-Long stage1 实验线训练：
 
 ```bash
-.venv/bin/python scripts/train_sft.py --config configs/stage1/mix_long_sft.yaml
+ CUDA_VISIBLE_DEVICES=1 .venv/bin/python scripts/train_sft.py --config configs/stage1/mix_long_sft.yaml
 ```
 
 Math220K stage1 对照线训练：
