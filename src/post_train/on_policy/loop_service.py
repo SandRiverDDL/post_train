@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from post_train.config import load_eval_config, load_on_policy_data_config, load_sft_config
-from post_train.on_policy_data import InsufficientRetainedSamplesError, load_query_candidates, prepare_on_policy_sft_dataset_from_queries
-from post_train.on_policy_trainset import load_anchor_rows
+from post_train.on_policy.data import InsufficientRetainedSamplesError, load_query_candidates, prepare_on_policy_sft_dataset_from_queries
+from post_train.on_policy.trainset import load_anchor_rows
 
 from .loop_paths import build_round_data_config, build_round_name, build_round_paths
 from .loop_round import (

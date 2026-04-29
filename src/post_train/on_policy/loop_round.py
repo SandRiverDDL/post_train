@@ -5,8 +5,8 @@ from typing import Any
 
 from post_train.config import EvalConfig, EvalTaskConfig, OnPolicyDataConfig, OnPolicyLoopConfig, SFTTrainConfig
 from post_train.eval import run_eval_task
-from post_train.on_policy_data import prepare_on_policy_sft_dataset_from_queries
-from post_train.on_policy_trainset import build_mixed_plus_anchor_dataset
+from post_train.on_policy.data import prepare_on_policy_sft_dataset_from_queries
+from post_train.on_policy.trainset import build_mixed_plus_anchor_dataset
 from post_train.sft import train_sft
 from post_train.sft_selection import run_checkpoint_selection
 

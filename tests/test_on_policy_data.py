@@ -101,7 +101,7 @@ class OnPolicyDataTest(unittest.TestCase):
             )
             cfg = load_on_policy_data_config(config_path)
 
-            with patch("post_train.on_policy_data.load_dataset_rows") as mock_loader:
+            with patch("post_train.on_policy.data.load_dataset_rows") as mock_loader:
                 query_rows, report = load_query_candidates(cfg)
 
         mock_loader.assert_not_called()
@@ -135,7 +135,7 @@ class OnPolicyDataTest(unittest.TestCase):
                 {"id": "1", "problem": "What is 2 + 2?", "answer": "4"},
             ]
 
-            with patch("post_train.on_policy_data.load_dataset_rows", return_value=raw_rows):
+            with patch("post_train.on_policy.data.load_dataset_rows", return_value=raw_rows):
                 query_rows, report = build_query_pool(cfg)
 
         self.assertEqual(report["excluded_questions"], 1)
@@ -169,7 +169,7 @@ class OnPolicyDataTest(unittest.TestCase):
                 {"id": "unseen-1", "problem": "Unseen question?", "answer": "4"},
             ]
 
-            with patch("post_train.on_policy_data.load_dataset_rows", return_value=raw_rows):
+            with patch("post_train.on_policy.data.load_dataset_rows", return_value=raw_rows):
                 query_rows, report = load_query_candidates(cfg)
 
         self.assertEqual(report["available_rows"], 1)
@@ -195,7 +195,7 @@ class OnPolicyDataTest(unittest.TestCase):
                 {"id": "1", "problem": "What is 2 + 2?", "answer": "4"},
             ]
 
-            with patch("post_train.on_policy_data.load_dataset_rows", return_value=raw_rows):
+            with patch("post_train.on_policy.data.load_dataset_rows", return_value=raw_rows):
                 query_rows, report = build_query_pool(cfg)
 
         self.assertEqual(len(query_rows), 2)
@@ -345,7 +345,7 @@ class OnPolicyDataTest(unittest.TestCase):
             ]
 
             with patch(
-                "post_train.on_policy_data.sample_candidate_responses",
+                "post_train.on_policy.data.sample_candidate_responses",
                 return_value=(raw_samples, {"sample_count": 2}),
             ):
                 result = prepare_on_policy_sft_dataset_from_queries(
