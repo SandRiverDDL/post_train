@@ -29,6 +29,7 @@
 
 ## 当前已确认事实
 
+- ssh -R 反向隧道会出现“假活”状态：本地 ssh 进程仍在、服务器 127.0.0.1:17897 端口也可连接，但真实 HTTP 请求已经超时；代理是否真的可用，必须用 curl -I -m 15 https://www.google.com 这类实际请求验证，而不能只看进程或端口。
 - `GRPO` 训练与评测链路都能确认 `LoRA` 已正确挂上，不是静默退化成 `base model`
 - 先前某轮 dev 结果异常偏低，主因是评测时 `max_new_tokens=512` 导致大量截断，而不是 checkpoint 没挂 LoRA
 - 当前 `stage1_mix_long_sft/checkpoint-300` 在 `math500_dev200` 上约为 `0.635 ~ 0.645`
