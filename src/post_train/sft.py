@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -152,86 +153,117 @@ def preview_training_samples(path: str | Path, *, count: int = 3) -> str:
     return "\n".join(parts)
 
 
-def train_sft(cfg) -> Path:
+class ProfitStatsMixin:
+    def _init_profit_controls(self, *, loss_mode: str, profit_enabled: bool, profit_threshold: float) -> None:
+        self.loss_mode = loss_mode
+        self.profit_enabled = profit_enabled
+        self.profit_threshold = profit_threshold
+        self._reset_profit_stats()
+
+    def _reset_profit_stats(self) -> None:
+        self._profit_stats = {
+            "valid_tokens": 0.0,
+            "kept_tokens": 0.0,
+            "filtered_tokens": 0.0,
+            "empty_batches": 0.0,
+            "avg_gold_prob_weighted_sum": 0.0,
+            "opsft_batch_max_completion_tokens_sum": 0.0,
+            "opsft_avg_completion_tokens_sum": 0.0,
+            "opsft_effective_sample_count_sum": 0.0,
+            "opsft_zero_completion_batches": 0.0,
+            "step_count": 0.0,
+        }
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        labels = inputs["labels"]
+        model_inputs = _extract_model_inputs(inputs)
+        outputs = model(**model_inputs)
+        logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
+        loss, metrics = _compute_sft_loss(
+            logits,
+            labels,
+            loss_mode=self.loss_mode,
+            profit_enabled=self.profit_enabled,
+            profit_threshold=self.profit_threshold,
+        )
+        self._profit_stats["valid_tokens"] += metrics["valid_tokens"]
+        self._profit_stats["kept_tokens"] += metrics["kept_tokens"]
+        self._profit_stats["filtered_tokens"] += metrics["filtered_tokens"]
+        self._profit_stats["empty_batches"] += metrics["empty_batches"]
+        self._profit_stats["avg_gold_prob_weighted_sum"] += metrics["avg_gold_prob"] * metrics["kept_tokens"]
+        self._profit_stats["opsft_batch_max_completion_tokens_sum"] += metrics["opsft_batch_max_completion_tokens"]
+        self._profit_stats["opsft_avg_completion_tokens_sum"] += metrics["opsft_avg_completion_tokens"]
+        self._profit_stats["opsft_effective_sample_count_sum"] += metrics["opsft_effective_sample_count"]
+        self._profit_stats["opsft_zero_completion_batches"] += metrics["opsft_zero_completion_batches"]
+        self._profit_stats["step_count"] += 1.0
+        return (loss, outputs) if return_outputs else loss
+
+    def log(self, logs: dict[str, float], start_time=None) -> None:
+        if self.loss_mode == "opsft" and self._profit_stats["step_count"] > 0:
+            logs = dict(logs)
+            step_count = self._profit_stats["step_count"]
+            logs["opsft_batch_max_completion_tokens"] = (
+                self._profit_stats["opsft_batch_max_completion_tokens_sum"] / step_count
+            )
+            logs["opsft_avg_completion_tokens"] = self._profit_stats["opsft_avg_completion_tokens_sum"] / step_count
+            logs["opsft_effective_sample_count"] = (
+                self._profit_stats["opsft_effective_sample_count_sum"] / step_count
+            )
+            logs["opsft_zero_completion_batch_count"] = self._profit_stats["opsft_zero_completion_batches"]
+        elif self.profit_enabled and self._profit_stats["valid_tokens"] > 0:
+            logs = dict(logs)
+            valid_tokens = self._profit_stats["valid_tokens"]
+            kept_tokens = self._profit_stats["kept_tokens"]
+            logs["profit_kept_ratio"] = kept_tokens / valid_tokens
+            logs["profit_filtered_ratio"] = self._profit_stats["filtered_tokens"] / valid_tokens
+            logs["profit_retention_ratio"] = logs["profit_kept_ratio"]
+            logs["profit_avg_gold_prob"] = (
+                self._profit_stats["avg_gold_prob_weighted_sum"] / kept_tokens if kept_tokens > 0 else 0.0
+            )
+            logs["profit_empty_batch_count"] = self._profit_stats["empty_batches"]
+        self._reset_profit_stats()
+        return super().log(logs, start_time=start_time)
+
+
+def _build_training_args(cfg, tokenizer: Any):
+    from trl import SFTConfig
+
+    return SFTConfig(
+        output_dir=str(cfg.output_dir),
+        learning_rate=cfg.learning_rate,
+        per_device_train_batch_size=cfg.batch_size,
+        gradient_accumulation_steps=cfg.gradient_accumulation_steps,
+        num_train_epochs=cfg.epochs,
+        warmup_ratio=cfg.warmup_ratio,
+        weight_decay=cfg.weight_decay,
+        logging_steps=cfg.logging_steps,
+        seed=cfg.seed,
+        report_to="none",
+        max_length=cfg.max_seq_length,
+        eos_token=tokenizer.eos_token,
+        pad_token=tokenizer.pad_token,
+        group_by_length=cfg.group_by_length,
+        length_column_name="length",
+        save_strategy=cfg.save_strategy,
+        save_steps=cfg.save_steps,
+        save_total_limit=cfg.save_total_limit,
+        ddp_find_unused_parameters=False,
+    )
+
+
+def _train_sft_unsloth(cfg) -> Path:
     import unsloth  # noqa: F401
-    from trl import SFTConfig, SFTTrainer
+    from trl import SFTTrainer
     from unsloth import FastLanguageModel
 
-    class ProfitSFTTrainer(SFTTrainer):
+    class ProfitSFTTrainer(ProfitStatsMixin, SFTTrainer):
         def __init__(self, *args, loss_mode: str, profit_enabled: bool, profit_threshold: float, **kwargs) -> None:
             super().__init__(*args, **kwargs)
-            self.loss_mode = loss_mode
-            self.profit_enabled = profit_enabled
-            self.profit_threshold = profit_threshold
-            self._reset_profit_stats()
-
-        def _reset_profit_stats(self) -> None:
-            self._profit_stats = {
-                "valid_tokens": 0.0,
-                "kept_tokens": 0.0,
-                "filtered_tokens": 0.0,
-                "empty_batches": 0.0,
-                "avg_gold_prob_weighted_sum": 0.0,
-                "opsft_batch_max_completion_tokens_sum": 0.0,
-                "opsft_avg_completion_tokens_sum": 0.0,
-                "opsft_effective_sample_count_sum": 0.0,
-                "opsft_zero_completion_batches": 0.0,
-                "step_count": 0.0,
-            }
-
-        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-            labels = inputs["labels"]
-            model_inputs = _extract_model_inputs(inputs)
-            outputs = model(**model_inputs)
-            logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
-            loss, metrics = _compute_sft_loss(
-                logits,
-                labels,
-                loss_mode=self.loss_mode,
-                profit_enabled=self.profit_enabled,
-                profit_threshold=self.profit_threshold,
+            self._init_profit_controls(
+                loss_mode=loss_mode,
+                profit_enabled=profit_enabled,
+                profit_threshold=profit_threshold,
             )
-            self._profit_stats["valid_tokens"] += metrics["valid_tokens"]
-            self._profit_stats["kept_tokens"] += metrics["kept_tokens"]
-            self._profit_stats["filtered_tokens"] += metrics["filtered_tokens"]
-            self._profit_stats["empty_batches"] += metrics["empty_batches"]
-            self._profit_stats["avg_gold_prob_weighted_sum"] += metrics["avg_gold_prob"] * metrics["kept_tokens"]
-            self._profit_stats["opsft_batch_max_completion_tokens_sum"] += metrics["opsft_batch_max_completion_tokens"]
-            self._profit_stats["opsft_avg_completion_tokens_sum"] += metrics["opsft_avg_completion_tokens"]
-            self._profit_stats["opsft_effective_sample_count_sum"] += metrics["opsft_effective_sample_count"]
-            self._profit_stats["opsft_zero_completion_batches"] += metrics["opsft_zero_completion_batches"]
-            self._profit_stats["step_count"] += 1.0
-            return (loss, outputs) if return_outputs else loss
-
-        def log(self, logs: dict[str, float], start_time=None) -> None:
-            if self.loss_mode == "opsft" and self._profit_stats["step_count"] > 0:
-                logs = dict(logs)
-                step_count = self._profit_stats["step_count"]
-                logs["opsft_batch_max_completion_tokens"] = (
-                    self._profit_stats["opsft_batch_max_completion_tokens_sum"] / step_count
-                )
-                logs["opsft_avg_completion_tokens"] = (
-                    self._profit_stats["opsft_avg_completion_tokens_sum"] / step_count
-                )
-                logs["opsft_effective_sample_count"] = (
-                    self._profit_stats["opsft_effective_sample_count_sum"] / step_count
-                )
-                logs["opsft_zero_completion_batch_count"] = self._profit_stats["opsft_zero_completion_batches"]
-            elif self.profit_enabled and self._profit_stats["valid_tokens"] > 0:
-                logs = dict(logs)
-                valid_tokens = self._profit_stats["valid_tokens"]
-                kept_tokens = self._profit_stats["kept_tokens"]
-                logs["profit_kept_ratio"] = kept_tokens / valid_tokens
-                logs["profit_filtered_ratio"] = self._profit_stats["filtered_tokens"] / valid_tokens
-                logs["profit_retention_ratio"] = logs["profit_kept_ratio"]
-                logs["profit_avg_gold_prob"] = (
-                    self._profit_stats["avg_gold_prob_weighted_sum"] / kept_tokens
-                    if kept_tokens > 0
-                    else 0.0
-                )
-                logs["profit_empty_batch_count"] = self._profit_stats["empty_batches"]
-            self._reset_profit_stats()
-            return super().log(logs, start_time=start_time)
 
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=cfg.model_name,
@@ -253,26 +285,7 @@ def train_sft(cfg) -> Path:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    training_args = SFTConfig(
-        output_dir=str(cfg.output_dir),
-        learning_rate=cfg.learning_rate,
-        per_device_train_batch_size=cfg.batch_size,
-        gradient_accumulation_steps=cfg.gradient_accumulation_steps,
-        num_train_epochs=cfg.epochs,
-        warmup_ratio=cfg.warmup_ratio,
-        weight_decay=cfg.weight_decay,
-        logging_steps=cfg.logging_steps,
-        seed=cfg.seed,
-        report_to="none",
-        max_length=cfg.max_seq_length,
-        eos_token=tokenizer.eos_token,
-        pad_token=tokenizer.pad_token,
-        group_by_length=cfg.group_by_length,
-        length_column_name="length",
-        save_strategy=cfg.save_strategy,
-        save_steps=cfg.save_steps,
-        save_total_limit=cfg.save_total_limit,
-    )
+    training_args = _build_training_args(cfg, tokenizer)
 
     trainer = ProfitSFTTrainer(
         model=model,
@@ -289,3 +302,73 @@ def train_sft(cfg) -> Path:
         trainer.save_model(str(output_dir))
         tokenizer.save_pretrained(str(output_dir))
     return output_dir
+
+
+def _train_sft_trl_peft(cfg) -> Path:
+    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from trl import SFTTrainer
+
+    class ProfitSFTTrainer(ProfitStatsMixin, SFTTrainer):
+        def __init__(self, *args, loss_mode: str, profit_enabled: bool, profit_threshold: float, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self._init_profit_controls(
+                loss_mode=loss_mode,
+                profit_enabled=profit_enabled,
+                profit_threshold=profit_threshold,
+            )
+
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    if torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
+
+    tokenizer = AutoTokenizer.from_pretrained(cfg.model_name, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    quantization_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+        bnb_4bit_use_double_quant=True,
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        cfg.model_name,
+        trust_remote_code=True,
+        quantization_config=quantization_config,
+        device_map={"": local_rank} if torch.cuda.is_available() else None,
+    )
+    model = prepare_model_for_kbit_training(model)
+    peft_config = LoraConfig(
+        r=cfg.lora_rank,
+        lora_alpha=cfg.lora_alpha,
+        lora_dropout=cfg.lora_dropout,
+        bias="none",
+        task_type="CAUSAL_LM",
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+    )
+    model = get_peft_model(model, peft_config)
+
+    train_dataset = build_train_dataset(cfg.train_dataset, tokenizer, max_length=cfg.max_seq_length)
+    training_args = _build_training_args(cfg, tokenizer)
+    trainer = ProfitSFTTrainer(
+        model=model,
+        processing_class=tokenizer,
+        train_dataset=train_dataset,
+        args=training_args,
+        loss_mode=cfg.loss_mode,
+        profit_enabled=cfg.profit_enabled,
+        profit_threshold=cfg.profit_threshold,
+    )
+    trainer.train()
+    output_dir = ensure_parent(cfg.output_dir / "placeholder.txt").parent
+    if cfg.export_final_model:
+        trainer.save_model(str(output_dir))
+        tokenizer.save_pretrained(str(output_dir))
+    return output_dir
+
+
+def train_sft(cfg) -> Path:
+    if cfg.backend == "trl_peft":
+        return _train_sft_trl_peft(cfg)
+    return _train_sft_unsloth(cfg)

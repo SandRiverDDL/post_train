@@ -37,7 +37,7 @@
 - 以 `math500_dev200` 的 `200` 题规模来看，这一档差异仍处在高噪声区间，不能据此认定 `GRPO` 已明显优于或劣于当前 SFT 基线
 - 当前 JustRL rollout 初筛暴露明显长度问题：`max_new_tokens=2048` 下 raw response token p50 贴近 2048，存在大量正确 boxed 后继续输出并被截断的轨迹；这类样本不应无过滤地当作高质量 SFT 数据。
 - 当前可用于快速对照的 JustRL/Mix-Long 同题 SFT 数据为 `data/rollout/math_sft/justrl_deepseek_1500/train.rollout_rejection_lt2000_matched321.jsonl` 与 `train.mix_long_lt2000_matched321.jsonl`，筛选口径是 JustRL 正确轨迹 `solution_tokens < 2000` 且能在 Mix-Long 中精确匹配同题 prompt。
-- 当前主环境中 `unsloth 2025.9.9 + trl 0.26.2` 会在 import 阶段生成非法 `UnslothGRPOTrainer.py`，SFT 小实验短期应优先走纯 `TRL/PEFT` 后端，避免被 Unsloth 的 GRPO patch 兼容问题阻塞。
+- 当前主环境中 `unsloth 2025.9.9 + trl 0.26.2` 会在 import 阶段生成非法 `UnslothGRPOTrainer.py`，SFT 小实验短期已切到 `backend=trl_peft`，避免被 Unsloth 的 GRPO patch 兼容问题阻塞；后续若继续使用 Unsloth，应单独整理兼容环境。
 
 ## 当前最重要的问题
 

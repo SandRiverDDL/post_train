@@ -25,6 +25,7 @@ class SFTTrainConfig(BaseModel):
     weight_decay: float = 0.01
     logging_steps: int = Field(default=5, ge=1)
     group_by_length: bool = True
+    backend: Literal["unsloth", "trl_peft"] = "unsloth"
     loss_mode: Literal["standard", "opsft"] = "standard"
     profit_enabled: bool = False
     profit_threshold: float = Field(default=0.1, gt=0.0, lt=1.0)
