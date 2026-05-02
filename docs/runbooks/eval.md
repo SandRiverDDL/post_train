@@ -65,3 +65,32 @@
 - checkpoint selection 会复用同一个 vLLM backend runner，只切换 LoRA adapter
 - `AIME24/AIME25` 默认不在 `configs/eval/default.yaml` 里，需要用单独配置
 - `AIME24/AIME25` 当前通过同一条评测链路支持每题多采样与 `pass@1`
+
+## 结果总表维护
+
+评测结束后刷新总表：
+
+```bash
+.venv/bin/python scripts/report_eval_results.py
+```
+
+默认读取：
+
+- `outputs/eval/**/result.json`
+- `docs/analysis/eval_metadata.yaml`
+- metadata 中列出的历史手动记录，例如 `tmp/results.md` 与 `tmp/new_results.md`
+
+默认写入：
+
+- `docs/analysis/eval_registry.jsonl`
+- `docs/analysis/eval_leaderboard.md`
+
+维护规则：
+
+- 不手改 `eval_registry.jsonl` 和 `eval_leaderboard.md`，它们是生成文件
+- `eval_registry.jsonl` 保留扫描到的全量结果
+- `eval_metadata.yaml` 是人工展示白名单，只写重要模型、效果好的 checkpoint、关键 baseline 与明确要归档的坏例
+- 手动维护 `eval_metadata.yaml` 里的 `method / label / role / ignore / notes`
+- 未写入 metadata 的模型默认只进 registry，不进 leaderboard
+- 同模型同任务同时存在正式 `result.json` 与手动记录时，正式 `result.json` 优先
+- `math500_dev200` 这类 dev-only 结果只进入 Task Details，不进入 Main Results

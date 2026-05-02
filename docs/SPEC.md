@@ -85,10 +85,17 @@
   - `entropy`
 - 当前结果输出口径：`outputs/eval/<模型路径>/<task>/result.json` 与 `raw.json`
 - 当前 checkpoint 排名输出口径：`<train_output_dir>/dev_eval/dev_ranking.json` 与 `best_checkpoint.json`
+- 当前结果汇总口径：
+  - `docs/analysis/eval_metadata.yaml` 是人工维护的展示白名单，只写重要模型、效果好的 checkpoint、关键 baseline 与明确要归档的坏例
+  - `docs/analysis/eval_registry.jsonl` 是自动生成的机器可读索引
+  - `docs/analysis/eval_leaderboard.md` 是自动生成的人读主表
+  - `outputs/eval/**/result.json` 优先级高于 `tmp/results.md`、`tmp/new_results.md` 等历史手动记录
+  - 未写入 metadata 的模型仍进入 registry，但不进入 leaderboard
+  - 主表只展示白名单模型的 `math500/gsm8k/aime24/aime25` 主任务结果，dev-only 结果不进入 Main Results
 
 ## Prompt 与格式原则
 
-- 统一要求答案中必须包含 `oxed{...}`
+- 统一要求答案中必须包含 `\boxed{...}`
 - 当前阶段若 `boxed_rate / parse_success_rate` 显著下降，优先视为格式退化，而不是直接下结论说推理能力退化
 - 若评测长度设置导致截断比例过高，必须先修正长度口径，再比较模型优劣
 

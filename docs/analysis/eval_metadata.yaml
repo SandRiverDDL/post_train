@@ -1,0 +1,47 @@
+manual_result_files:
+- tmp/results.md
+- tmp/new_results.md
+ignore_patterns: []
+models:
+  /home/fsw/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2:
+    method: Base
+    label: Qwen2.5-Math-1.5B base
+    role: base
+    ignore: false
+    notes: 原始基座模型
+  Qwen/Qwen2.5-Math-1.5B:
+    method: Base
+    label: Qwen2.5-Math-1.5B base
+    role: base
+    ignore: false
+    notes: 历史手动记录
+  outputs/grpo_3090_dapo_server/checkpoint-660:
+    method: GRPO
+    label: GRPO DAPO ckpt660
+    role: best_math
+    ignore: false
+    notes: 当前 MATH500 最好主线结果
+  outputs/grpo_4090/checkpoint-383:
+    method: GRPO
+    label: grpo_4090/checkpoint-383
+    role: bad_run
+    ignore: true
+    notes: 异常低分历史结果，暂不进入主表
+  outputs/lightning_opd_nemotron_candidate_ddp_gpu1_6_b1:
+    method: Lightning-OPD
+    label: OPD Nemo from base mistake
+    role: bad_run
+    ignore: true
+    notes: 错误从 base 起训，保留作反例
+  outputs/lightning_opd_nemotron_from_stage1_ckpt300_ep1:
+    method: Lightning-OPD
+    label: OPD Nemo from SFT ckpt300 ep1
+    role: experiment
+    ignore: false
+    notes: max_new_tokens=2048 后 MATH500=0.690
+  outputs/stage1_mix_long_sft/checkpoint-300:
+    method: SFT
+    label: SFT mix-long ckpt300
+    role: baseline
+    ignore: false
+    notes: 当前 SFT 基线

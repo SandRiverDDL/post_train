@@ -55,6 +55,7 @@
   - `model.py` 负责 base / LoRA adapter 解析与 `model_resolution`
   - `vllm.py` 只负责 vLLM backend runner 与 raw generation
   - `metrics.py` 负责 raw 结果到 metrics / predictions 的转换
+  - `reporting.py` 负责扫描评测产物、合并历史手动记录、应用 metadata，并生成 leaderboard / registry
   - 输出按模型路径与任务名分目录落盘
   - 当前已补齐 `model_resolution` 诊断，显式记录：
     - `pretrained`
@@ -180,7 +181,37 @@ rd211 + anchor
 - 当前 v1 重点服务 `GRPO`
 - 训练后编排与训练实现本身解耦
 
-### 4. on-policy SFT（历史路线）
+### 4. 评测结果维护
+
+输入：
+
+- `outputs/eval/**/result.json`
+- `docs/analysis/eval_metadata.yaml` 中人工选中的模型
+- 历史手动结果文件，例如 `tmp/results.md` 与 `tmp/new_results.md`
+
+输出：
+
+- `docs/analysis/eval_registry.jsonl`
+- `docs/analysis/eval_leaderboard.md`
+
+流程：
+
+result.json
+-> 历史手动结果解析
+-> 同模型同任务去重
+-> metadata 白名单标注与过滤
+-> 生成机器索引与主表
+
+说明：
+
+- `scripts/report_eval_results.py` 只负责 CLI 编排
+- 核心合并和渲染逻辑在 `post_train.eval.reporting`
+- 正式 `outputs/eval/**/result.json` 优先于历史手动记录
+- registry 保留扫描到的全量结果
+- leaderboard 只展示 metadata 显式跟踪的模型
+- dev-only 结果保留在 Task Details，不进入 Main Results
+
+### 5. on-policy SFT（历史路线）
 
 输入：
 
@@ -198,7 +229,7 @@ rd211 + anchor
 - 该路线当前保留，但不再是主线
 - 文档仍保留，供后续对照或回退时参考
 
-### 5. 两阶段 SFT / SIMPO（候选路线）
+### 6. 两阶段 SFT / SIMPO（候选路线）
 
 输入：
 

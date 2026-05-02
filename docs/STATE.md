@@ -17,6 +17,9 @@
 - 当前 `GRPO` 双卡编排：`src/post_train/grpo/server.py`
 - 当前单轮实验编排入口：`scripts/run_experiment_workflow.py`
 - 当前评测结果目录口径：`outputs/eval/<模型路径>/<task>/result.json` 与 `raw.json`
+- 当前评测总表：`docs/analysis/eval_leaderboard.md`
+- 当前评测机器索引：`docs/analysis/eval_registry.jsonl`
+- 当前评测 metadata：`docs/analysis/eval_metadata.yaml`
 - 当前 checkpoint 选择输出口径：`<train_output_dir>/dev_eval/dev_ranking.json` 与 `best_checkpoint.json`
 - 当前 `select_sft_checkpoint.py` / `eval_model.py` 已补齐 `model_resolution` 诊断，可明确记录：
   - `pretrained`
@@ -37,7 +40,13 @@
 - 以 `math500_dev200` 的 `200` 题规模来看，这一档差异仍处在高噪声区间，不能据此认定 `GRPO` 已明显优于或劣于当前 SFT 基线
 - 当前 JustRL rollout 初筛暴露明显长度问题：`max_new_tokens=2048` 下 raw response token p50 贴近 2048，存在大量正确 boxed 后继续输出并被截断的轨迹；这类样本不应无过滤地当作高质量 SFT 数据。
 - 当前可用于快速对照的 JustRL/Mix-Long 同题 SFT 数据为 `data/rollout/math_sft/justrl_deepseek_1500/train.rollout_rejection_lt2000_matched321.jsonl` 与 `train.mix_long_lt2000_matched321.jsonl`，筛选口径是 JustRL 正确轨迹 `solution_tokens < 2000` 且能在 Mix-Long 中精确匹配同题 prompt。
+- 当前 JustRL rollout 脚本已支持 `shard -> merge -> select` 一键链路，可用两个独立 vLLM 进程做数据并行；默认 MATH train 全量 7500 题、每题 1 轨迹、`max_model_len=4096`、`max_new_tokens=3650`，主入口为 `runs/rollout/justrl_math_shards.sh`，产物按 `shards/`、`raw/`、`sft/`、`logs/` 分目录保存，总 report 为输出目录根部 `report.json`。
+- JustRL rollout 详细诊断见 `docs/analysis/justrl_rollout_diagnostics.md`：主要问题是 `<think>` 格式不稳定、`double_boxed` 普遍、简单题过度推理、长组合/几何题容易截断，不建议 raw rollout 直接作为 SFT 数据。
 - 当前主环境中 `unsloth 2025.9.9 + trl 0.26.2` 会在 import 阶段生成非法 `UnslothGRPOTrainer.py`，SFT 小实验短期已切到 `backend=trl_peft`，避免被 Unsloth 的 GRPO patch 兼容问题阻塞；后续若继续使用 Unsloth，应单独整理兼容环境。
+- 当前评测结果维护已统一到 `scripts/report_eval_results.py`：自动扫描 `outputs/eval/**/result.json` 并全量写入 registry；`docs/analysis/eval_metadata.yaml` 只作为人工展示白名单，维护重要模型、关键 baseline、效果好的 checkpoint 与明确归档的坏例。
+- 当前主结果口径以 `docs/analysis/eval_leaderboard.md` 为准；`math500_dev200` 这类 dev-only 结果只进入 Task Details，不进入 Main Results。
+- 当前已记录的主线结果：`outputs/grpo_3090_dapo_server/checkpoint-660` 在 MATH500 为 `0.7240`，`outputs/stage1_mix_long_sft/checkpoint-300` 在 MATH500 为 `0.7020`，`outputs/lightning_opd_nemotron_from_stage1_ckpt300_ep1` 在 MATH500 为 `0.6900`。
+- 当前 Lightning OPD gap 诊断见 `docs/analysis/lightning_opd_gap_diagnostics.md`：Nemotron 和 SFT student 的 top16 overlap 平均为 `9.84/16`，但 `teacher_logprob < student_logprob` 的 token 占 `60.67%`，说明 topK support 有重叠但 sampled-token OPD 信号整体偏负；继续放大 topK=1 OPD 风险较高。
 
 ## 当前最重要的问题
 
@@ -50,7 +59,8 @@
    - `completions/clipped_ratio`
    - `entropy`
 5. JustRL 采样轨迹用于 SFT 前必须加强长度与完整性过滤；当前 parser 会读取第一个 `\boxed{...}`，不能单独证明生成轨迹完整。
-6. 旧路线文档仍在仓库中保留，必须继续和当前 `GRPO` 主线区分，不自动视为当前推荐配置。
+6. Lightning OPD 当前 topK=1 sampled-token 信号偏负，下一步若继续 OPD，应优先实现或测试 topK support loss，而不是直接增加 epoch。
+7. 旧路线文档仍在仓库中保留，必须继续和当前 `GRPO` 主线区分，不自动视为当前推荐配置。
 
 ## 当前优先级
 
@@ -86,5 +96,7 @@
 - 当前阶段设计看 `docs/SPEC.md`
 - 结构分层看 `docs/ARCHITECTURE.md`
 - 当前状态看 `docs/STATE.md`
+- 评测结果总表看 `docs/analysis/eval_leaderboard.md`
+- 评测结果维护命令看 `docs/runbooks/eval.md`
 - `GRPO` 运行与操作说明看 `docs/runbooks/grpo.md`
 - 旧路线实验记录看 `docs/experiments/README.md` 与 `docs/experiments/two-stage-sft-simpo.md`
