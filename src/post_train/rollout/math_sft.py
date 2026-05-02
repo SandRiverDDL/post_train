@@ -33,6 +33,18 @@ def _write_json(path: str | Path, payload: dict[str, Any]) -> Path:
     return output_path
 
 
+def shard_suffix(shard_index: int, num_shards: int) -> str:
+    return f"shard{shard_index}-of-{num_shards}"
+
+
+def select_shard_rows(rows: list[dict[str, Any]], *, num_shards: int, shard_index: int) -> list[dict[str, Any]]:
+    if num_shards < 1:
+        raise ValueError(f"num_shards 必须 >= 1，实际为 {num_shards}")
+    if shard_index < 0 or shard_index >= num_shards:
+        raise ValueError(f"shard_index 必须在 [0, {num_shards})，实际为 {shard_index}")
+    return [row for index, row in enumerate(rows) if index % num_shards == shard_index]
+
+
 def parse_level(value: Any) -> int | None:
     if isinstance(value, int):
         return value
@@ -54,7 +66,7 @@ def build_math_query_pool(
     *,
     dataset_name: str = DEFAULT_MATH_DATASET,
     split: str = "train",
-    sample_size: int = 1500,
+    sample_size: int | None = 1500,
     seed: int = 42,
     levels: list[int] | None = None,
     cache_dir: str | None = None,
@@ -107,6 +119,8 @@ def build_math_query_pool(
             }
         )
 
+    if sample_size is None:
+        sample_size = len(query_rows)
     if sample_size > len(query_rows):
         raise ValueError(f"MATH 可用样本不足：需要 {sample_size} 条，过滤后只有 {len(query_rows)} 条。")
 
@@ -223,6 +237,96 @@ def sample_math_responses(
     }
 
 
+def merge_raw_sample_shards(paths: list[str | Path]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not paths:
+        raise ValueError("至少需要一个 raw shard 文件。")
+
+    merged: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, int]] = set()
+    shard_reports: list[dict[str, Any]] = []
+    for path in paths:
+        rows = read_jsonl(path)
+        duplicate_count = 0
+        for row in rows:
+            key = (str(row.get("id", "")), int(row.get("meta", {}).get("shard_index", -1)))
+            if key in seen_keys:
+                duplicate_count += 1
+                continue
+            seen_keys.add(key)
+            merged.append(row)
+        shard_reports.append({"path": str(path), "rows": len(rows), "duplicates_skipped": duplicate_count})
+
+    merged.sort(key=lambda row: int(row.get("meta", {}).get("global_query_index", 0)))
+    return merged, {
+        "shards": shard_reports,
+        "raw_rows": sum(report["rows"] for report in shard_reports),
+        "merged_rows": len(merged),
+        "duplicates_skipped": sum(report["duplicates_skipped"] for report in shard_reports),
+    }
+
+
+def select_sft_outputs_from_raw_samples(
+    *,
+    raw_samples: list[dict[str, Any]],
+    output_dir: str | Path,
+    retained_count: int,
+    mix_long_sample_size: int,
+    mix_long_path: str | Path,
+    seed: int,
+    generation_model: str,
+    report_extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    base = Path(output_dir)
+    sft_dir = base / "sft"
+    retained_path = sft_dir / "train.rollout_rejection.jsonl"
+    mix_long_path_out = sft_dir / "train.mix_long_random.jsonl"
+    report_path = base / "report.json"
+
+    retained_rows, rejection_report = build_rejection_sampled_sft_rows(
+        raw_samples,
+        target_count=retained_count,
+        seed=seed + 1,
+        generation_model=generation_model,
+    )
+    write_jsonl(retained_path, retained_rows)
+
+    mix_long_rows, mix_long_report = sample_mix_long_rows(
+        path=mix_long_path,
+        sample_size=mix_long_sample_size,
+        seed=seed + 2,
+    )
+    write_jsonl(mix_long_path_out, mix_long_rows)
+
+    extra = dict(report_extra or {})
+    extra_outputs = dict(extra.pop("outputs", {}))
+    outputs = {
+        **extra_outputs,
+        "rollout_rejection_train": str(retained_path),
+        "mix_long_random_train": str(mix_long_path_out),
+    }
+    report = {
+        "model": generation_model,
+        **extra,
+        "rejection_sampling": rejection_report,
+        "mix_long_sampling": mix_long_report,
+        "outputs": outputs,
+        "sft_selection": {
+            "rollout_rejection_count": len(retained_rows),
+            "mix_long_count": len(mix_long_rows),
+        },
+    }
+    if report_path.exists():
+        existing = json.loads(report_path.read_text(encoding="utf-8"))
+        existing_outputs = dict(existing.get("outputs", {}))
+        existing_outputs.update(report["outputs"])
+        existing.update(report)
+        existing["outputs"] = existing_outputs
+        report = existing
+    _write_json(report_path, report)
+    report["outputs"]["report"] = str(report_path)
+    return report
+
+
 def build_rejection_sampled_sft_rows(
     raw_samples: list[dict[str, Any]],
     *,
@@ -298,7 +402,7 @@ def prepare_math_rollout_sft_dataset(
     *,
     model: str,
     output_dir: str | Path,
-    sample_size: int = 1500,
+    sample_size: int | None = 1500,
     responses_per_prompt: int = 8,
     retained_count: int = 1000,
     mix_long_sample_size: int = 1000,
@@ -313,14 +417,13 @@ def prepare_math_rollout_sft_dataset(
     max_model_len: int = 2048,
     gpu_memory_utilization: float = 0.8,
     cache_dir: str | None = None,
+    num_shards: int = 1,
+    shard_index: int | None = None,
+    rollout_only: bool = False,
 ) -> dict[str, Any]:
     base = Path(output_dir)
     query_path = base / "query_pool.jsonl"
-    raw_samples_path = base / "raw_samples.jsonl"
-    retained_path = base / "train.rollout_rejection.jsonl"
-    mix_long_path_out = base / "train.mix_long_random.jsonl"
-    combined_path = base / "train.combined.jsonl"
-    report_path = base / "report.json"
+    raw_samples_path = base / "raw" / "raw_samples.jsonl"
 
     query_rows, query_report = build_math_query_pool(
         dataset_name=dataset_name,
@@ -330,7 +433,30 @@ def prepare_math_rollout_sft_dataset(
         levels=levels,
         cache_dir=cache_dir,
     )
+    for index, row in enumerate(query_rows):
+        meta = dict(row.get("meta", {}))
+        meta["global_query_index"] = index
+        row["meta"] = meta
     write_jsonl(query_path, query_rows)
+
+    if shard_index is not None:
+        suffix = shard_suffix(shard_index, num_shards)
+        shard_dir = base / "shards" / suffix
+        query_path = shard_dir / "query_pool.jsonl"
+        raw_samples_path = shard_dir / "raw_samples.jsonl"
+        shard_rows = select_shard_rows(query_rows, num_shards=num_shards, shard_index=shard_index)
+        for local_index, row in enumerate(shard_rows):
+            meta = dict(row.get("meta", {}))
+            meta.update({"num_shards": num_shards, "shard_index": shard_index, "shard_local_index": local_index})
+            row["meta"] = meta
+        query_rows = shard_rows
+        query_report = {
+            **query_report,
+            "num_shards": num_shards,
+            "shard_index": shard_index,
+            "shard_queries": len(query_rows),
+        }
+        write_jsonl(query_path, query_rows)
 
     raw_samples, sampling_report = sample_math_responses(
         query_rows,
@@ -344,44 +470,93 @@ def prepare_math_rollout_sft_dataset(
     )
     write_jsonl(raw_samples_path, raw_samples)
 
-    retained_rows, rejection_report = build_rejection_sampled_sft_rows(
-        raw_samples,
-        target_count=retained_count,
-        seed=seed + 1,
-        generation_model=model,
-    )
-    write_jsonl(retained_path, retained_rows)
-
-    mix_long_rows, mix_long_report = sample_mix_long_rows(
-        path=mix_long_path,
-        sample_size=mix_long_sample_size,
-        seed=seed + 2,
-    )
-    write_jsonl(mix_long_path_out, mix_long_rows)
-
-    combined_rows = list(retained_rows) + list(mix_long_rows)
-    combined_rows = sample_rows(combined_rows, sample_size=len(combined_rows), seed=seed + 3)
-    write_jsonl(combined_path, combined_rows)
+    base_report = {
+        "query_pool": query_report,
+        "sampling": sampling_report,
+    }
+    if rollout_only or shard_index is not None:
+        report_path = (
+            base / "shards" / shard_suffix(shard_index, num_shards) / "report.json"
+            if shard_index is not None
+            else base / "report.rollout_only.json"
+        )
+        report = {
+            "model": model,
+            **base_report,
+            "outputs": {
+                "query_pool": str(query_path),
+                "raw_samples": str(raw_samples_path),
+            },
+        }
+        _write_json(report_path, report)
+        report["outputs"]["report"] = str(report_path)
+        return report
 
     report = {
         "model": model,
-        "query_pool": query_report,
-        "sampling": sampling_report,
-        "rejection_sampling": rejection_report,
-        "mix_long_sampling": mix_long_report,
+        **base_report,
         "outputs": {
             "query_pool": str(query_path),
             "raw_samples": str(raw_samples_path),
-            "rollout_rejection_train": str(retained_path),
-            "mix_long_random_train": str(mix_long_path_out),
-            "combined_train": str(combined_path),
-        },
-        "combined": {
-            "rollout_rejection_count": len(retained_rows),
-            "mix_long_count": len(mix_long_rows),
-            "total": len(combined_rows),
         },
     }
+    _write_json(base / "report.json", report)
+    report["outputs"]["report"] = str(base / "report.json")
+    return report
+
+
+def merge_math_rollout_sft_dataset(
+    *,
+    model: str,
+    output_dir: str | Path,
+    raw_shards: list[str | Path],
+) -> dict[str, Any]:
+    base = Path(output_dir)
+    raw_samples, merge_report = merge_raw_sample_shards(raw_shards)
+    raw_samples_path = base / "raw" / "raw_samples.merged.jsonl"
+    write_jsonl(raw_samples_path, raw_samples)
+    report_path = base / "report.json"
+    report = {
+        "model": model,
+        "merge": merge_report,
+        "outputs": {
+            "raw_samples": str(raw_samples_path),
+        },
+    }
+    if report_path.exists():
+        existing = json.loads(report_path.read_text(encoding="utf-8"))
+        existing_outputs = dict(existing.get("outputs", {}))
+        existing_outputs.update(report["outputs"])
+        existing.update(report)
+        existing["outputs"] = existing_outputs
+        report = existing
     _write_json(report_path, report)
     report["outputs"]["report"] = str(report_path)
     return report
+
+
+def select_math_sft_dataset(
+    *,
+    model: str,
+    output_dir: str | Path,
+    raw_samples_path: str | Path,
+    retained_count: int,
+    mix_long_sample_size: int,
+    mix_long_path: str | Path = DEFAULT_MIX_LONG_PATH,
+    seed: int = 42,
+) -> dict[str, Any]:
+    raw_samples = read_jsonl(raw_samples_path)
+    return select_sft_outputs_from_raw_samples(
+        raw_samples=raw_samples,
+        output_dir=output_dir,
+        retained_count=retained_count,
+        mix_long_sample_size=mix_long_sample_size,
+        mix_long_path=mix_long_path,
+        seed=seed,
+        generation_model=model,
+        report_extra={
+            "outputs": {
+                "raw_samples": str(raw_samples_path),
+            },
+        },
+    )

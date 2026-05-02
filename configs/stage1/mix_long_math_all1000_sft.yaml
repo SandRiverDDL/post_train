@@ -1,13 +1,13 @@
 model_name: /mnt/dataY/fsw/cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
-train_dataset: data/rollout/math_sft/justrl_deepseek_1500/train.mix_long_matched469.jsonl
-output_dir: outputs/stage1_mix_long469_matched_sft
+train_dataset: data/rollout/math_sft/justrl_deepseek_math_all_len3650/sft/train.mix_long_random.jsonl
+output_dir: outputs/stage1_mix_long_math_all1000_sft
 seed: 42
-max_seq_length: 768
+max_seq_length: 2560
 learning_rate: 1.0e-4
 
-epochs: 10
-batch_size: 16
-gradient_accumulation_steps: 2
+epochs: 1
+batch_size: 4
+gradient_accumulation_steps: 8
 lora_rank: 16
 lora_alpha: 32
 lora_dropout: 0.0
@@ -15,6 +15,7 @@ warmup_ratio: 0.03
 weight_decay: 0.01
 logging_steps: 5
 group_by_length: true
+backend: trl_peft
 
 save_strategy: steps
 save_steps: 25

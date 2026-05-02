@@ -1,4 +1,4 @@
-model_name: /home/fsw/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
+model_name: /mnt/dataY/fsw/cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
 train_dataset: data/rollout/math_sft/justrl_deepseek_1500/train.mix_long_lt2000_matched321.jsonl
 output_dir: outputs/stage1_mix_long_lt2000_matched321_sft
 seed: 42

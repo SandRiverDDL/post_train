@@ -21,6 +21,26 @@ Mix-Long stage1 实验线：
 .venv/bin/python scripts/prepare_stage2_mix_long_data.py --config configs/stage1/mix_long_data.yaml
 ```
 
+JustRL rollout 对照线支持单进程与分片并行。双 GPU 分片 rollout 默认把同一批 MATH prompt 按 `index % num_shards` 切分；两个 shard 成功后会自动合并 raw，并分别生成 rollout rejection 与 mix-long random 两份 SFT 数据：
+
+```bash
+runs/rollout/justrl_math_shards.sh
+```
+
+默认参数：
+
+- `sample_size=all`，即 `EleutherAI/hendrycks_math` train 全量 7500 题
+- `responses_per_prompt=1`
+- `max_model_len=4096`
+- `max_new_tokens=3650`
+- `GPU0=3`、`GPU1=4`，可通过环境变量覆盖
+
+默认产物目录按用途拆分为 `shards/`、`raw/`、`sft/`、`logs/`，总 report 位于输出目录根部 `report.json`。恢复或重选数据时可单独使用 `runs/rollout/justrl_math_merge.sh` 与 `runs/rollout/justrl_math_select_sft.sh`，日常不需要手动执行。
+
+注意：`max_new_tokens=3650` 是上限，不保证每题都能生成 3650 token；长 prompt 会受 `max_model_len=4096` 约束。可用 `SAMPLE_SIZE=3000` 临时跑子集。
+
+JustRL rollout 的质量诊断见 `docs/analysis/justrl_rollout_diagnostics.md`。结论是 raw 轨迹存在明显冗余和格式噪声：`<think>` 不稳定、`double_boxed` 普遍、简单题过长、长题易截断；用于 SFT 前应做长度、完整性和重复答案过滤。
+
 Math220K stage1 对照线：
 
 ```bash
