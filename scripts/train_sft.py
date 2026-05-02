@@ -16,12 +16,18 @@ from post_train.sft import preview_training_samples, train_sft
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="运行 stage1 / stage2 SFT。")
     parser.add_argument("--config", required=True, help="SFT 配置文件路径")
+    parser.add_argument("--set", action="append", default=[], help="覆盖配置字段，例如 --set distill_top_k=8")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     cfg = load_sft_config(args.config)
+    if args.set:
+        from omegaconf import OmegaConf
+
+        overrides = OmegaConf.to_container(OmegaConf.from_dotlist(args.set), resolve=True)
+        cfg = type(cfg).model_validate({**cfg.model_dump(), **overrides})
     preview = preview_training_samples(cfg.train_dataset)
     if preview:
         print(preview)

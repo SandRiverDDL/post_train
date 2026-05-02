@@ -10,7 +10,15 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from post_train.sft import _compute_sft_loss, _extract_model_inputs, _tokenize_prompt_completion, build_train_dataset
+from post_train.sft import (
+    LightningOPDDataCollator,
+    _compute_lightning_opd_loss,
+    _compute_sft_loss,
+    _extract_model_inputs,
+    _tokenize_prompt_completion,
+    build_lightning_opd_dataset,
+    build_train_dataset,
+)
 
 
 class BoundaryMergingTokenizer:
@@ -249,6 +257,128 @@ class SFTProfitLossTest(unittest.TestCase):
         self.assertEqual(loss.item(), 0.0)
         self.assertEqual(metrics["opsft_effective_sample_count"], 0.0)
         self.assertEqual(metrics["opsft_zero_completion_batches"], 1.0)
+
+
+class LightningOPDTest(unittest.TestCase):
+    def test_build_lightning_opd_dataset_aligns_teacher_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dataset_path = Path(tmp_dir) / "train.jsonl"
+            dataset_path.write_text(
+                (
+                    '{"id":"1","input_ids":[10,11,12],"response_mask":[0,1,1],'
+                    '"teacher_token_logprobs":[-0.1,-0.2],'
+                    '"teacher_topk_token_ids":[[11,1],[12,2]],'
+                    '"teacher_topk_logprobs":[[-0.1,-1.0],[-0.2,-1.2]]}\n'
+                ),
+                encoding="utf-8",
+            )
+
+            dataset = build_lightning_opd_dataset(dataset_path, max_length=8, distill_top_k=2)
+            row = dataset[0]
+
+        self.assertEqual(row["labels"], [-100, 11, 12])
+        self.assertEqual(row["teacher_token_logprobs"], [0.0, -0.1, -0.2])
+        self.assertEqual(row["teacher_topk_token_ids"][1], [11, 1])
+        self.assertEqual(row["teacher_topk_mask"][0], [0, 0])
+
+    def test_build_lightning_opd_dataset_rejects_missing_requested_topk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dataset_path = Path(tmp_dir) / "train.jsonl"
+            dataset_path.write_text(
+                (
+                    '{"id":"1","input_ids":[10,11],"response_mask":[0,1],'
+                    '"teacher_token_logprobs":[-0.1],'
+                    '"teacher_topk_token_ids":[[11]],'
+                    '"teacher_topk_logprobs":[[-0.1]]}\n'
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "distill_top_k=2"):
+                build_lightning_opd_dataset(dataset_path, max_length=8, distill_top_k=2)
+
+    def test_lightning_opd_collator_pads_nested_topk_fields(self) -> None:
+        features = [
+            {
+                "input_ids": [10, 11],
+                "attention_mask": [1, 1],
+                "labels": [-100, 11],
+                "response_mask": [0, 1],
+                "teacher_token_logprobs": [0.0, -0.1],
+                "teacher_topk_token_ids": [[0, 0], [11, 1]],
+                "teacher_topk_logprobs": [[0.0, 0.0], [-0.1, -1.0]],
+                "teacher_topk_mask": [[0, 0], [1, 1]],
+            },
+            {
+                "input_ids": [20],
+                "attention_mask": [1],
+                "labels": [-100],
+                "response_mask": [0],
+                "teacher_token_logprobs": [0.0],
+                "teacher_topk_token_ids": [[0, 0]],
+                "teacher_topk_logprobs": [[0.0, 0.0]],
+                "teacher_topk_mask": [[0, 0]],
+            },
+        ]
+
+        batch = LightningOPDDataCollator(pad_token_id=99)(features)
+
+        self.assertEqual(tuple(batch["input_ids"].shape), (2, 2))
+        self.assertEqual(tuple(batch["teacher_topk_token_ids"].shape), (2, 2, 2))
+        self.assertEqual(batch["input_ids"][1, 1].item(), 99)
+
+    def test_compute_lightning_opd_loss_baseline_uses_trajectory_teacher_logprob(self) -> None:
+        logits = torch.tensor([[[0.0, 2.0, 0.0], [0.0, 0.0, 2.0]]], dtype=torch.float32)
+        input_ids = torch.tensor([[0, 1]], dtype=torch.long)
+        response_mask = torch.tensor([[False, True]])
+        teacher_logprobs = torch.tensor([[0.0, -0.2]], dtype=torch.float32)
+        topk_ids = torch.zeros((1, 2, 1), dtype=torch.long)
+        topk_logprobs = torch.zeros((1, 2, 1), dtype=torch.float32)
+        topk_mask = torch.zeros((1, 2, 1), dtype=torch.bool)
+
+        loss, metrics = _compute_lightning_opd_loss(
+            logits,
+            input_ids,
+            response_mask,
+            teacher_logprobs,
+            topk_ids,
+            topk_logprobs,
+            topk_mask,
+            distill_top_k=1,
+            topk_kd_weight=0.0,
+            opd_weight=1.0,
+        )
+
+        student_logprob = torch.log_softmax(logits[:, 0, :], dim=-1)[0, 1]
+        expected = -((-0.2 - student_logprob.detach()) * student_logprob)
+        self.assertAlmostEqual(loss.item(), expected.item(), places=6)
+        self.assertEqual(metrics["valid_tokens"], 1.0)
+        self.assertEqual(metrics["topk_kd_loss"], 0.0)
+
+    def test_compute_lightning_opd_loss_adds_topk_auxiliary(self) -> None:
+        logits = torch.tensor([[[0.0, 2.0, 1.0], [0.0, 0.0, 2.0]]], dtype=torch.float32)
+        input_ids = torch.tensor([[0, 1]], dtype=torch.long)
+        response_mask = torch.tensor([[False, True]])
+        teacher_logprobs = torch.tensor([[0.0, -0.2]], dtype=torch.float32)
+        topk_ids = torch.tensor([[[0, 0], [1, 2]]], dtype=torch.long)
+        topk_logprobs = torch.tensor([[[0.0, 0.0], [-0.1, -1.1]]], dtype=torch.float32)
+        topk_mask = torch.tensor([[[False, False], [True, True]]])
+
+        loss, metrics = _compute_lightning_opd_loss(
+            logits,
+            input_ids,
+            response_mask,
+            teacher_logprobs,
+            topk_ids,
+            topk_logprobs,
+            topk_mask,
+            distill_top_k=2,
+            topk_kd_weight=0.5,
+            opd_weight=1.0,
+        )
+
+        self.assertTrue(torch.isfinite(loss))
+        self.assertGreater(metrics["topk_kd_loss"], 0.0)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,22 @@
+output_dir: data/lightning_opd/candidate
+prompt_source: data/on_policy_loop/query_strategy/candidate_pool.jsonl
+sample_size: 1000
+seed: 42
+num_shards: 2
+
+student_model: outputs/stage1_mix_long_sft/checkpoint-300
+student_base_model: /mnt/dataY/fsw/cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
+teacher_model: /mnt/dataY/fsw/cache/huggingface/hub/models--hbx--JustRL-DeepSeek-1.5B/snapshots/0637e4096c789c67f9eecbe8355e0bdeddede1c2
+tokenizer_name: /mnt/dataY/fsw/cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
+
+max_new_tokens: 3076
+max_model_len: 4096
+temperature: 0.8
+top_p: 1.0
+top_k: 32
+teacher_batch_size: 16
+gpu_memory_utilization: 0.85
+teacher_load_in_4bit: true
+
+gpu0: 0
+gpu1: 1

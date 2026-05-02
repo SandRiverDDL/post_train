@@ -1,0 +1,9 @@
+extends: candidate.yaml
+
+output_dir: data/lightning_opd/nemotron_candidate
+
+teacher_model: /mnt/dataY/fsw/cache/huggingface/hub/models--nvidia--OpenMath-Nemotron-1.5B/snapshots/59280da0e5508b98f4ae90e8886442f28ed561cb
+tokenizer_name: /mnt/dataY/fsw/cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
+
+num_shards: 1
+gpu0: 1

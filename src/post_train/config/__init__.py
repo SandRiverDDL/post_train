@@ -5,6 +5,7 @@ from pathlib import Path
 from .eval import EvalConfig, EvalTaskConfig
 from .grpo import GRPODataConfig, GRPORewardConfig, GRPOTrainConfig
 from .io import load_yaml_config
+from .lightning_opd import LightningOPDDataConfig
 from .on_policy import OnPolicyDataConfig, OnPolicyLoopConfig
 from .stage1 import Stage1Math220kDataConfig, Stage1RSRCandidatesConfig, Stage1RSRSelectConfig
 from .sft import SFTTrainConfig
@@ -45,6 +46,10 @@ def load_grpo_train_config(path: str | Path) -> GRPOTrainConfig:
     return GRPOTrainConfig.model_validate(load_yaml_config(path))
 
 
+def load_lightning_opd_data_config(path: str | Path) -> LightningOPDDataConfig:
+    return LightningOPDDataConfig.model_validate(load_yaml_config(path))
+
+
 def load_simpo_config(path: str | Path) -> SimPOConfig:
     return SimPOConfig.model_validate(load_yaml_config(path))
 
@@ -83,6 +88,7 @@ __all__ = [
     "GRPODataConfig",
     "GRPORewardConfig",
     "GRPOTrainConfig",
+    "LightningOPDDataConfig",
     "OnPolicyDataConfig",
     "OnPolicyLoopConfig",
     "SFTTrainConfig",
@@ -99,6 +105,7 @@ __all__ = [
     "load_grpo_data_config",
     "load_grpo_reward_config",
     "load_grpo_train_config",
+    "load_lightning_opd_data_config",
     "load_on_policy_data_config",
     "load_on_policy_loop_config",
     "load_sft_config",

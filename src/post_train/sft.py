@@ -53,6 +53,114 @@ def build_train_dataset(path: str | Path, tokenizer: Any, *, max_length: int) ->
     return Dataset.from_list(tokenized_rows)
 
 
+def _dense_lightning_teacher_fields(row: dict[str, Any], *, max_length: int, distill_top_k: int) -> dict[str, Any]:
+    input_ids = list(row["input_ids"])
+    response_mask = [int(value) for value in row["response_mask"]]
+    if len(input_ids) != len(response_mask):
+        raise ValueError(f"input_ids 与 response_mask 长度不一致：id={row.get('id')}")
+    if len(input_ids) > max_length:
+        raise ValueError(f"Lightning-OPD 样本超过 max_seq_length：id={row.get('id')} len={len(input_ids)}")
+
+    response_positions = [index for index, value in enumerate(response_mask) if value]
+    token_logprobs = list(row["teacher_token_logprobs"])
+    if len(response_positions) != len(token_logprobs):
+        raise ValueError(f"teacher_token_logprobs 与 response token 数不一致：id={row.get('id')}")
+
+    topk_ids = row.get("teacher_topk_token_ids", [])
+    topk_logprobs = row.get("teacher_topk_logprobs", [])
+    stored_top_k = len(topk_ids[0]) if topk_ids else 0
+    if distill_top_k > 1 and stored_top_k < distill_top_k:
+        raise ValueError(
+            f"distill_top_k={distill_top_k} 大于离线保存 topK={stored_top_k}：id={row.get('id')}，需要重新生成 teacher logits。"
+        )
+    if topk_ids and (len(topk_ids) != len(response_positions) or len(topk_logprobs) != len(response_positions)):
+        raise ValueError(f"teacher_topk_* 与 response token 数不一致：id={row.get('id')}")
+
+    labels = [-100 if value == 0 else token_id for token_id, value in zip(input_ids, response_mask, strict=True)]
+    teacher_token_logprobs = [0.0] * len(input_ids)
+    teacher_topk_token_ids = [[0] * stored_top_k for _ in input_ids]
+    teacher_topk_logprobs = [[0.0] * stored_top_k for _ in input_ids]
+    teacher_topk_mask = [[0] * stored_top_k for _ in input_ids]
+    for response_index, pos in enumerate(response_positions):
+        teacher_token_logprobs[pos] = float(token_logprobs[response_index])
+        if stored_top_k:
+            teacher_topk_token_ids[pos] = [int(value) for value in topk_ids[response_index]]
+            teacher_topk_logprobs[pos] = [float(value) for value in topk_logprobs[response_index]]
+            teacher_topk_mask[pos] = [1] * stored_top_k
+
+    return {
+        "input_ids": input_ids,
+        "attention_mask": [1] * len(input_ids),
+        "labels": labels,
+        "response_mask": response_mask,
+        "teacher_token_logprobs": teacher_token_logprobs,
+        "teacher_topk_token_ids": teacher_topk_token_ids,
+        "teacher_topk_logprobs": teacher_topk_logprobs,
+        "teacher_topk_mask": teacher_topk_mask,
+        "length": len(input_ids),
+    }
+
+
+def build_lightning_opd_dataset(path: str | Path, *, max_length: int, distill_top_k: int) -> Dataset:
+    rows = read_jsonl(path)
+    tokenized_rows = [
+        _dense_lightning_teacher_fields(row, max_length=max_length, distill_top_k=distill_top_k)
+        for row in rows
+    ]
+    return Dataset.from_list(tokenized_rows)
+
+
+class LightningOPDDataCollator:
+    def __init__(self, *, pad_token_id: int) -> None:
+        self.pad_token_id = pad_token_id
+
+    def __call__(self, features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
+        max_len = max(len(feature["input_ids"]) for feature in features)
+        stored_top_k = max(
+            (len(token_topk) for feature in features for token_topk in feature.get("teacher_topk_token_ids", [])),
+            default=0,
+        )
+
+        batch: dict[str, list[Any]] = {
+            "input_ids": [],
+            "attention_mask": [],
+            "labels": [],
+            "response_mask": [],
+            "teacher_token_logprobs": [],
+            "teacher_topk_token_ids": [],
+            "teacher_topk_logprobs": [],
+            "teacher_topk_mask": [],
+        }
+        for feature in features:
+            length = len(feature["input_ids"])
+            pad_len = max_len - length
+            batch["input_ids"].append(feature["input_ids"] + [self.pad_token_id] * pad_len)
+            batch["attention_mask"].append(feature["attention_mask"] + [0] * pad_len)
+            batch["labels"].append(feature["labels"] + [-100] * pad_len)
+            batch["response_mask"].append(feature["response_mask"] + [0] * pad_len)
+            batch["teacher_token_logprobs"].append(feature["teacher_token_logprobs"] + [0.0] * pad_len)
+
+            topk_ids = [list(values) + [0] * (stored_top_k - len(values)) for values in feature["teacher_topk_token_ids"]]
+            topk_logprobs = [
+                list(values) + [0.0] * (stored_top_k - len(values)) for values in feature["teacher_topk_logprobs"]
+            ]
+            topk_mask = [list(values) + [0] * (stored_top_k - len(values)) for values in feature["teacher_topk_mask"]]
+            batch["teacher_topk_token_ids"].append(topk_ids + [[0] * stored_top_k for _ in range(pad_len)])
+            batch["teacher_topk_logprobs"].append(topk_logprobs + [[0.0] * stored_top_k for _ in range(pad_len)])
+            batch["teacher_topk_mask"].append(topk_mask + [[0] * stored_top_k for _ in range(pad_len)])
+
+        return {
+            "input_ids": torch.tensor(batch["input_ids"], dtype=torch.long),
+            "attention_mask": torch.tensor(batch["attention_mask"], dtype=torch.long),
+            "labels": torch.tensor(batch["labels"], dtype=torch.long),
+            "response_mask": torch.tensor(batch["response_mask"], dtype=torch.bool),
+            "teacher_token_logprobs": torch.tensor(batch["teacher_token_logprobs"], dtype=torch.float32),
+            "teacher_topk_token_ids": torch.tensor(batch["teacher_topk_token_ids"], dtype=torch.long),
+            "teacher_topk_logprobs": torch.tensor(batch["teacher_topk_logprobs"], dtype=torch.float32),
+            "teacher_topk_mask": torch.tensor(batch["teacher_topk_mask"], dtype=torch.bool),
+        }
+
+
 def _compute_sft_loss(
     logits: torch.Tensor,
     labels: torch.Tensor,
@@ -125,6 +233,70 @@ def _compute_sft_loss(
     }
 
 
+def _compute_lightning_opd_loss(
+    logits: torch.Tensor,
+    input_ids: torch.Tensor,
+    response_mask: torch.Tensor,
+    teacher_token_logprobs: torch.Tensor,
+    teacher_topk_token_ids: torch.Tensor,
+    teacher_topk_logprobs: torch.Tensor,
+    teacher_topk_mask: torch.Tensor,
+    *,
+    distill_top_k: int,
+    topk_kd_weight: float,
+    opd_weight: float,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    shift_logits = logits[..., :-1, :].contiguous()
+    shift_input_ids = input_ids[..., 1:].contiguous()
+    shift_response_mask = response_mask[..., 1:].contiguous()
+    shift_teacher_logprobs = teacher_token_logprobs[..., 1:].contiguous()
+
+    log_probs = F.log_softmax(shift_logits, dim=-1)
+    student_token_logprobs = log_probs.gather(dim=-1, index=shift_input_ids.unsqueeze(-1)).squeeze(-1)
+    valid_mask = shift_response_mask
+    valid_count = int(valid_mask.sum().item())
+    if valid_count == 0:
+        zero = logits.sum() * 0.0
+        return zero, {
+            "valid_tokens": 0.0,
+            "opd_loss": 0.0,
+            "topk_kd_loss": 0.0,
+            "avg_teacher_logprob": 0.0,
+            "avg_student_logprob": 0.0,
+        }
+
+    advantage = shift_teacher_logprobs - student_token_logprobs.detach()
+    opd_token_loss = -advantage * student_token_logprobs
+    opd_loss = (opd_token_loss * valid_mask.to(opd_token_loss.dtype)).sum() / valid_mask.sum().to(opd_token_loss.dtype)
+
+    topk_kd_loss = logits.sum() * 0.0
+    if topk_kd_weight > 0.0 and distill_top_k > 1:
+        stored_top_k = teacher_topk_token_ids.shape[-1]
+        if distill_top_k > stored_top_k:
+            raise ValueError(f"distill_top_k={distill_top_k} 大于 batch 中离线保存 topK={stored_top_k}。")
+        topk_ids = teacher_topk_token_ids[..., 1:, :distill_top_k].contiguous()
+        topk_logprobs = teacher_topk_logprobs[..., 1:, :distill_top_k].contiguous()
+        topk_mask = teacher_topk_mask[..., 1:, :distill_top_k].contiguous() & valid_mask.unsqueeze(-1)
+        masked_teacher_logprobs = topk_logprobs.masked_fill(~topk_mask, torch.finfo(topk_logprobs.dtype).min)
+        teacher_probs = torch.softmax(masked_teacher_logprobs, dim=-1).masked_fill(~topk_mask, 0.0)
+        student_topk_logprobs = log_probs.gather(dim=-1, index=topk_ids.clamp_min(0))
+        kd_per_token = -(teacher_probs * student_topk_logprobs).sum(dim=-1)
+        kd_token_mask = topk_mask.any(dim=-1)
+        if bool(kd_token_mask.any().item()):
+            topk_kd_loss = (kd_per_token * kd_token_mask.to(kd_per_token.dtype)).sum() / kd_token_mask.sum().to(
+                kd_per_token.dtype
+            )
+
+    loss = opd_weight * opd_loss + topk_kd_weight * topk_kd_loss
+    return loss, {
+        "valid_tokens": float(valid_count),
+        "opd_loss": float(opd_loss.detach().item()),
+        "topk_kd_loss": float(topk_kd_loss.detach().item()),
+        "avg_teacher_logprob": float(shift_teacher_logprobs[valid_mask].detach().mean().item()),
+        "avg_student_logprob": float(student_token_logprobs[valid_mask].detach().mean().item()),
+    }
+
+
 def _extract_model_inputs(inputs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     model_inputs = {"input_ids": inputs["input_ids"]}
     if "attention_mask" in inputs:
@@ -136,7 +308,7 @@ def preview_training_samples(path: str | Path, *, count: int = 3) -> str:
     rows = read_jsonl(path)[:count]
     parts: list[str] = []
     for row in rows:
-        completion = clean_solution_text(str(row["solution"]))
+        completion = clean_solution_text(str(row.get("solution", row.get("response", ""))))
         parts.append(
             "\n".join(
                 [
@@ -154,10 +326,22 @@ def preview_training_samples(path: str | Path, *, count: int = 3) -> str:
 
 
 class ProfitStatsMixin:
-    def _init_profit_controls(self, *, loss_mode: str, profit_enabled: bool, profit_threshold: float) -> None:
+    def _init_profit_controls(
+        self,
+        *,
+        loss_mode: str,
+        profit_enabled: bool,
+        profit_threshold: float,
+        distill_top_k: int,
+        topk_kd_weight: float,
+        opd_weight: float,
+    ) -> None:
         self.loss_mode = loss_mode
         self.profit_enabled = profit_enabled
         self.profit_threshold = profit_threshold
+        self.distill_top_k = distill_top_k
+        self.topk_kd_weight = topk_kd_weight
+        self.opd_weight = opd_weight
         self._reset_profit_stats()
 
     def _reset_profit_stats(self) -> None:
@@ -171,6 +355,11 @@ class ProfitStatsMixin:
             "opsft_avg_completion_tokens_sum": 0.0,
             "opsft_effective_sample_count_sum": 0.0,
             "opsft_zero_completion_batches": 0.0,
+            "lightning_opd_valid_tokens": 0.0,
+            "lightning_opd_loss_sum": 0.0,
+            "lightning_opd_topk_kd_loss_sum": 0.0,
+            "lightning_opd_teacher_logprob_sum": 0.0,
+            "lightning_opd_student_logprob_sum": 0.0,
             "step_count": 0.0,
         }
 
@@ -179,27 +368,59 @@ class ProfitStatsMixin:
         model_inputs = _extract_model_inputs(inputs)
         outputs = model(**model_inputs)
         logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
-        loss, metrics = _compute_sft_loss(
-            logits,
-            labels,
-            loss_mode=self.loss_mode,
-            profit_enabled=self.profit_enabled,
-            profit_threshold=self.profit_threshold,
-        )
-        self._profit_stats["valid_tokens"] += metrics["valid_tokens"]
-        self._profit_stats["kept_tokens"] += metrics["kept_tokens"]
-        self._profit_stats["filtered_tokens"] += metrics["filtered_tokens"]
-        self._profit_stats["empty_batches"] += metrics["empty_batches"]
-        self._profit_stats["avg_gold_prob_weighted_sum"] += metrics["avg_gold_prob"] * metrics["kept_tokens"]
-        self._profit_stats["opsft_batch_max_completion_tokens_sum"] += metrics["opsft_batch_max_completion_tokens"]
-        self._profit_stats["opsft_avg_completion_tokens_sum"] += metrics["opsft_avg_completion_tokens"]
-        self._profit_stats["opsft_effective_sample_count_sum"] += metrics["opsft_effective_sample_count"]
-        self._profit_stats["opsft_zero_completion_batches"] += metrics["opsft_zero_completion_batches"]
+        if self.loss_mode == "lightning_opd":
+            loss, metrics = _compute_lightning_opd_loss(
+                logits,
+                inputs["input_ids"],
+                inputs["response_mask"],
+                inputs["teacher_token_logprobs"],
+                inputs["teacher_topk_token_ids"],
+                inputs["teacher_topk_logprobs"],
+                inputs["teacher_topk_mask"],
+                distill_top_k=self.distill_top_k,
+                topk_kd_weight=self.topk_kd_weight,
+                opd_weight=self.opd_weight,
+            )
+            self._profit_stats["lightning_opd_valid_tokens"] += metrics["valid_tokens"]
+            self._profit_stats["lightning_opd_loss_sum"] += metrics["opd_loss"]
+            self._profit_stats["lightning_opd_topk_kd_loss_sum"] += metrics["topk_kd_loss"]
+            self._profit_stats["lightning_opd_teacher_logprob_sum"] += metrics["avg_teacher_logprob"]
+            self._profit_stats["lightning_opd_student_logprob_sum"] += metrics["avg_student_logprob"]
+        else:
+            loss, metrics = _compute_sft_loss(
+                logits,
+                labels,
+                loss_mode=self.loss_mode,
+                profit_enabled=self.profit_enabled,
+                profit_threshold=self.profit_threshold,
+            )
+            self._profit_stats["valid_tokens"] += metrics["valid_tokens"]
+            self._profit_stats["kept_tokens"] += metrics["kept_tokens"]
+            self._profit_stats["filtered_tokens"] += metrics["filtered_tokens"]
+            self._profit_stats["empty_batches"] += metrics["empty_batches"]
+            self._profit_stats["avg_gold_prob_weighted_sum"] += metrics["avg_gold_prob"] * metrics["kept_tokens"]
+            self._profit_stats["opsft_batch_max_completion_tokens_sum"] += metrics["opsft_batch_max_completion_tokens"]
+            self._profit_stats["opsft_avg_completion_tokens_sum"] += metrics["opsft_avg_completion_tokens"]
+            self._profit_stats["opsft_effective_sample_count_sum"] += metrics["opsft_effective_sample_count"]
+            self._profit_stats["opsft_zero_completion_batches"] += metrics["opsft_zero_completion_batches"]
         self._profit_stats["step_count"] += 1.0
         return (loss, outputs) if return_outputs else loss
 
     def log(self, logs: dict[str, float], start_time=None) -> None:
-        if self.loss_mode == "opsft" and self._profit_stats["step_count"] > 0:
+        if self.loss_mode == "lightning_opd" and self._profit_stats["step_count"] > 0:
+            logs = dict(logs)
+            step_count = self._profit_stats["step_count"]
+            logs["lightning_opd_valid_tokens"] = self._profit_stats["lightning_opd_valid_tokens"]
+            logs["lightning_opd_opd_loss"] = self._profit_stats["lightning_opd_loss_sum"] / step_count
+            logs["lightning_opd_topk_kd_loss"] = self._profit_stats["lightning_opd_topk_kd_loss_sum"] / step_count
+            logs["lightning_opd_avg_teacher_logprob"] = (
+                self._profit_stats["lightning_opd_teacher_logprob_sum"] / step_count
+            )
+            logs["lightning_opd_avg_student_logprob"] = (
+                self._profit_stats["lightning_opd_student_logprob_sum"] / step_count
+            )
+            logs["lightning_opd_distill_top_k"] = float(self.distill_top_k)
+        elif self.loss_mode == "opsft" and self._profit_stats["step_count"] > 0:
             logs = dict(logs)
             step_count = self._profit_stats["step_count"]
             logs["opsft_batch_max_completion_tokens"] = (
@@ -231,11 +452,16 @@ def _build_training_args(cfg, tokenizer: Any):
     return SFTConfig(
         output_dir=str(cfg.output_dir),
         learning_rate=cfg.learning_rate,
+        lr_scheduler_type=cfg.lr_scheduler_type,
+        max_steps=cfg.max_steps,
         per_device_train_batch_size=cfg.batch_size,
         gradient_accumulation_steps=cfg.gradient_accumulation_steps,
         num_train_epochs=cfg.epochs,
         warmup_ratio=cfg.warmup_ratio,
         weight_decay=cfg.weight_decay,
+        adam_beta1=cfg.adam_beta1,
+        adam_beta2=cfg.adam_beta2,
+        max_grad_norm=cfg.max_grad_norm,
         logging_steps=cfg.logging_steps,
         seed=cfg.seed,
         report_to="none",
@@ -248,6 +474,7 @@ def _build_training_args(cfg, tokenizer: Any):
         save_steps=cfg.save_steps,
         save_total_limit=cfg.save_total_limit,
         ddp_find_unused_parameters=False,
+        remove_unused_columns=False,
     )
 
 
@@ -257,12 +484,25 @@ def _train_sft_unsloth(cfg) -> Path:
     from unsloth import FastLanguageModel
 
     class ProfitSFTTrainer(ProfitStatsMixin, SFTTrainer):
-        def __init__(self, *args, loss_mode: str, profit_enabled: bool, profit_threshold: float, **kwargs) -> None:
+        def __init__(
+            self,
+            *args,
+            loss_mode: str,
+            profit_enabled: bool,
+            profit_threshold: float,
+            distill_top_k: int,
+            topk_kd_weight: float,
+            opd_weight: float,
+            **kwargs,
+        ) -> None:
             super().__init__(*args, **kwargs)
             self._init_profit_controls(
                 loss_mode=loss_mode,
                 profit_enabled=profit_enabled,
                 profit_threshold=profit_threshold,
+                distill_top_k=distill_top_k,
+                topk_kd_weight=topk_kd_weight,
+                opd_weight=opd_weight,
             )
 
     model, tokenizer = FastLanguageModel.from_pretrained(
@@ -270,7 +510,16 @@ def _train_sft_unsloth(cfg) -> Path:
         max_seq_length=cfg.max_seq_length,
         load_in_4bit=True,
     )
-    train_dataset = build_train_dataset(cfg.train_dataset, tokenizer, max_length=cfg.max_seq_length)
+    if cfg.loss_mode == "lightning_opd":
+        train_dataset = build_lightning_opd_dataset(
+            cfg.train_dataset,
+            max_length=cfg.max_seq_length,
+            distill_top_k=cfg.distill_top_k,
+        )
+        data_collator = LightningOPDDataCollator(pad_token_id=tokenizer.pad_token_id)
+    else:
+        train_dataset = build_train_dataset(cfg.train_dataset, tokenizer, max_length=cfg.max_seq_length)
+        data_collator = None
 
     model = FastLanguageModel.get_peft_model(
         model,
@@ -292,9 +541,13 @@ def _train_sft_unsloth(cfg) -> Path:
         processing_class=tokenizer,
         train_dataset=train_dataset,
         args=training_args,
+        data_collator=data_collator,
         loss_mode=cfg.loss_mode,
         profit_enabled=cfg.profit_enabled,
         profit_threshold=cfg.profit_threshold,
+        distill_top_k=cfg.distill_top_k,
+        topk_kd_weight=cfg.topk_kd_weight,
+        opd_weight=cfg.opd_weight,
     )
     trainer.train()
     output_dir = ensure_parent(cfg.output_dir / "placeholder.txt").parent
@@ -305,22 +558,42 @@ def _train_sft_unsloth(cfg) -> Path:
 
 
 def _train_sft_trl_peft(cfg) -> Path:
-    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+    from peft import LoraConfig, PeftConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
     from trl import SFTTrainer
 
     class ProfitSFTTrainer(ProfitStatsMixin, SFTTrainer):
-        def __init__(self, *args, loss_mode: str, profit_enabled: bool, profit_threshold: float, **kwargs) -> None:
+        def __init__(
+            self,
+            *args,
+            loss_mode: str,
+            profit_enabled: bool,
+            profit_threshold: float,
+            distill_top_k: int,
+            topk_kd_weight: float,
+            opd_weight: float,
+            **kwargs,
+        ) -> None:
             super().__init__(*args, **kwargs)
             self._init_profit_controls(
                 loss_mode=loss_mode,
                 profit_enabled=profit_enabled,
                 profit_threshold=profit_threshold,
+                distill_top_k=distill_top_k,
+                topk_kd_weight=topk_kd_weight,
+                opd_weight=opd_weight,
             )
 
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
     if torch.cuda.is_available():
         torch.cuda.set_device(local_rank)
+
+    model_path = Path(cfg.model_name)
+    is_adapter_checkpoint = (model_path / "adapter_config.json").exists()
+    base_model_name = cfg.model_name
+    if is_adapter_checkpoint:
+        peft_source_config = PeftConfig.from_pretrained(cfg.model_name)
+        base_model_name = cfg.adapter_base_model or peft_source_config.base_model_name_or_path
 
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
@@ -333,32 +606,48 @@ def _train_sft_trl_peft(cfg) -> Path:
         bnb_4bit_use_double_quant=True,
     )
     model = AutoModelForCausalLM.from_pretrained(
-        cfg.model_name,
+        base_model_name,
         trust_remote_code=True,
         quantization_config=quantization_config,
         device_map={"": local_rank} if torch.cuda.is_available() else None,
     )
     model = prepare_model_for_kbit_training(model)
-    peft_config = LoraConfig(
-        r=cfg.lora_rank,
-        lora_alpha=cfg.lora_alpha,
-        lora_dropout=cfg.lora_dropout,
-        bias="none",
-        task_type="CAUSAL_LM",
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-    )
-    model = get_peft_model(model, peft_config)
+    if is_adapter_checkpoint:
+        model = PeftModel.from_pretrained(model, cfg.model_name, is_trainable=True)
+    else:
+        peft_config = LoraConfig(
+            r=cfg.lora_rank,
+            lora_alpha=cfg.lora_alpha,
+            lora_dropout=cfg.lora_dropout,
+            bias="none",
+            task_type="CAUSAL_LM",
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        )
+        model = get_peft_model(model, peft_config)
 
-    train_dataset = build_train_dataset(cfg.train_dataset, tokenizer, max_length=cfg.max_seq_length)
+    if cfg.loss_mode == "lightning_opd":
+        train_dataset = build_lightning_opd_dataset(
+            cfg.train_dataset,
+            max_length=cfg.max_seq_length,
+            distill_top_k=cfg.distill_top_k,
+        )
+        data_collator = LightningOPDDataCollator(pad_token_id=tokenizer.pad_token_id)
+    else:
+        train_dataset = build_train_dataset(cfg.train_dataset, tokenizer, max_length=cfg.max_seq_length)
+        data_collator = None
     training_args = _build_training_args(cfg, tokenizer)
     trainer = ProfitSFTTrainer(
         model=model,
         processing_class=tokenizer,
         train_dataset=train_dataset,
         args=training_args,
+        data_collator=data_collator,
         loss_mode=cfg.loss_mode,
         profit_enabled=cfg.profit_enabled,
         profit_threshold=cfg.profit_threshold,
+        distill_top_k=cfg.distill_top_k,
+        topk_kd_weight=cfg.topk_kd_weight,
+        opd_weight=cfg.opd_weight,
     )
     trainer.train()
     output_dir = ensure_parent(cfg.output_dir / "placeholder.txt").parent
