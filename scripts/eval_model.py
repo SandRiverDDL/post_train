@@ -17,6 +17,7 @@ from post_train.eval import (
     resolve_eval_tasks,
     summarize_metrics_for_console,
 )
+from post_train.tracking import find_run_id_for_model, log_eval_result, start_run
 
 
 def parse_args() -> argparse.Namespace:
@@ -56,17 +57,34 @@ def main() -> None:
     )
     if backend != "vllm":
         raise ValueError("当前评测只支持 backend=vllm。")
-    eval_runner = EvalRunner(cfg.model_copy(update={"backend": backend}), model_name=model_name)
-    run_results = eval_runner.run_tasks(
-        tasks,
-        overrides=EvalRunOverrides(
-            batch_size=batch_size,
-            max_new_tokens=max_new_tokens,
-            limit=args.limit,
-            output_dir=cfg.output_dir,
-            max_lora_rank=max_lora_rank,
-        ),
-    )
+    run_id = find_run_id_for_model(model_name)
+    with start_run(
+        run_name=f"eval-{Path(str(model_name)).name}",
+        route="eval",
+        config_path=args.config,
+        params={
+            "model_name": model_name,
+            "backend": backend,
+            "batch_size": batch_size,
+            "max_new_tokens": max_new_tokens,
+            "limit": args.limit,
+            "tasks": [task.name for task in tasks],
+        },
+        run_id=run_id,
+    ):
+        eval_runner = EvalRunner(cfg.model_copy(update={"backend": backend}), model_name=model_name)
+        run_results = eval_runner.run_tasks(
+            tasks,
+            overrides=EvalRunOverrides(
+                batch_size=batch_size,
+                max_new_tokens=max_new_tokens,
+                limit=args.limit,
+                output_dir=cfg.output_dir,
+                max_lora_rank=max_lora_rank,
+            ),
+        )
+        for run_result in run_results:
+            log_eval_result(run_result)
     for run_result in run_results:
         result = run_result["result"]
         preview = preview_logged_samples(result)

@@ -14,6 +14,7 @@ from post_train.rollout.math_sft import (
     merge_math_rollout_sft_dataset,
     prepare_math_rollout_sft_dataset,
 )
+from post_train.tracking import log_data_artifacts, log_data_result, start_run
 
 
 def parse_sample_size(value: str) -> int | None:
@@ -29,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="从 MATH 抽题，用 vLLM rollout，并可合并 shard raw。")
     parser.add_argument("--mode", choices=("full", "shard", "merge"), default="full", help="full=单进程 raw rollout；shard=只生成当前分片 raw；merge=合并分片 raw。")
     parser.add_argument("--model", required=True, help="HF 模型 ID 或本地模型路径，例如 justrl 模型。")
+    parser.add_argument("--tokenizer-name", default=None, help="用于 chat template 的 tokenizer；默认等于 model。")
     parser.add_argument("--output-dir", default="data/rollout/math_sft/justrl_math1500", help="输出目录。")
     parser.add_argument("--dataset", default=DEFAULT_MATH_DATASET, help="MATH 数据集名；EleutherAI/hendrycks_math 会自动合并 7 个 config。")
     parser.add_argument("--split", default="train", help="MATH split。")
@@ -38,6 +40,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--top-p", type=float, default=0.95)
+    parser.add_argument("--use-chat-template", action="store_true", help="使用 tokenizer chat template 渲染 prompt。")
+    parser.add_argument("--system-prompt", default=None, help="chat template 的 system prompt。")
+    parser.add_argument("--assistant-prefill", default=None, help="追加到 assistant generation prompt 后的预填文本，例如 '<think>\\n'。")
     parser.add_argument("--max-new-tokens", type=int, default=1024)
     parser.add_argument("--max-model-len", type=int, default=2048)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.8)
@@ -50,40 +55,54 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    if args.mode == "merge":
-        if not args.raw_shards:
-            raise ValueError("merge 模式必须传 --raw-shards。")
-        result = merge_math_rollout_sft_dataset(
-            model=args.model,
-            output_dir=args.output_dir,
-            raw_shards=args.raw_shards,
-        )
-        print(json.dumps(result["outputs"], ensure_ascii=False, indent=2))
-        return
-
-    if args.mode == "shard" and args.shard_index is None:
-        raise ValueError("shard 模式必须传 --shard-index。")
-
-    result = prepare_math_rollout_sft_dataset(
-        model=args.model,
+    with start_run(
+        run_name=f"math-rollout-{args.mode}",
+        route="math_rollout_sft",
         output_dir=args.output_dir,
-        sample_size=args.sample_size,
-        responses_per_prompt=args.responses_per_prompt,
-        dataset_name=args.dataset,
-        split=args.split,
-        levels=args.levels,
-        seed=args.seed,
-        temperature=args.temperature,
-        top_p=args.top_p,
-        max_new_tokens=args.max_new_tokens,
-        max_model_len=args.max_model_len,
-        gpu_memory_utilization=args.gpu_memory_utilization,
-        cache_dir=args.cache_dir,
-        num_shards=args.num_shards,
-        shard_index=args.shard_index,
-        rollout_only=args.mode == "shard",
-    )
-    print(json.dumps(result["outputs"], ensure_ascii=False, indent=2))
+        params=vars(args),
+    ):
+        if args.mode == "merge":
+            if not args.raw_shards:
+                raise ValueError("merge 模式必须传 --raw-shards。")
+            result = merge_math_rollout_sft_dataset(
+                model=args.model,
+                output_dir=args.output_dir,
+                raw_shards=args.raw_shards,
+            )
+            log_data_result(result, artifact_name="merge.json")
+            log_data_artifacts([Path(args.output_dir) / "report.json"], artifact_path="data")
+            print(json.dumps(result["outputs"], ensure_ascii=False, indent=2))
+            return
+
+        if args.mode == "shard" and args.shard_index is None:
+            raise ValueError("shard 模式必须传 --shard-index。")
+
+        result = prepare_math_rollout_sft_dataset(
+            model=args.model,
+            tokenizer_name=args.tokenizer_name,
+            use_chat_template=args.use_chat_template,
+            system_prompt=args.system_prompt,
+            assistant_prefill=args.assistant_prefill,
+            output_dir=args.output_dir,
+            sample_size=args.sample_size,
+            responses_per_prompt=args.responses_per_prompt,
+            dataset_name=args.dataset,
+            split=args.split,
+            levels=args.levels,
+            seed=args.seed,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            max_new_tokens=args.max_new_tokens,
+            max_model_len=args.max_model_len,
+            gpu_memory_utilization=args.gpu_memory_utilization,
+            cache_dir=args.cache_dir,
+            num_shards=args.num_shards,
+            shard_index=args.shard_index,
+            rollout_only=args.mode == "shard",
+        )
+        log_data_result(result, artifact_name=f"{args.mode}.json")
+        log_data_artifacts([Path(args.output_dir) / "report.json"], artifact_path="data")
+        print(json.dumps(result["outputs"], ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

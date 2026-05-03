@@ -2,12 +2,16 @@
 set -euo pipefail
 
 MODEL="${MODEL:-/mnt/dataY/fsw/cache/huggingface/hub/models--hbx--JustRL-DeepSeek-1.5B/snapshots/0637e4096c789c67f9eecbe8355e0bdeddede1c2}"
+TOKENIZER_NAME="${TOKENIZER_NAME:-}"
 OUT="${OUT:-data/rollout/math_sft/justrl_deepseek_math_all_len3650}"
 SAMPLE_SIZE="${SAMPLE_SIZE:-all}"
 RESPONSES_PER_PROMPT="${RESPONSES_PER_PROMPT:-1}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-3650}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.85}"
+USE_CHAT_TEMPLATE="${USE_CHAT_TEMPLATE:-0}"
+SYSTEM_PROMPT="${SYSTEM_PROMPT:-}"
+ASSISTANT_PREFILL="${ASSISTANT_PREFILL:-}"
 NUM_SHARDS="${NUM_SHARDS:-2}"
 GPU0="${GPU0:-3}"
 GPU1="${GPU1:-4}"
@@ -24,6 +28,20 @@ fi
 
 mkdir -p "$LOG_DIR"
 
+EXTRA_ARGS=()
+if [[ -n "$TOKENIZER_NAME" ]]; then
+  EXTRA_ARGS+=(--tokenizer-name "$TOKENIZER_NAME")
+fi
+if [[ "$USE_CHAT_TEMPLATE" == "1" || "$USE_CHAT_TEMPLATE" == "true" ]]; then
+  EXTRA_ARGS+=(--use-chat-template)
+fi
+if [[ -n "$SYSTEM_PROMPT" ]]; then
+  EXTRA_ARGS+=(--system-prompt "$SYSTEM_PROMPT")
+fi
+if [[ -n "$ASSISTANT_PREFILL" ]]; then
+  EXTRA_ARGS+=(--assistant-prefill "$ASSISTANT_PREFILL")
+fi
+
 cleanup() {
   if [[ -n "$PID0" ]]; then kill "$PID0" 2>/dev/null || true; fi
   if [[ -n "$PID1" ]]; then kill "$PID1" 2>/dev/null || true; fi
@@ -35,6 +53,7 @@ echo "shard 0: GPU=$GPU0 log=$LOG_DIR/shard0.log"
 CUDA_VISIBLE_DEVICES="$GPU0" .venv/bin/python scripts/rollout_math_sft.py \
   --mode shard \
   --model "$MODEL" \
+  "${EXTRA_ARGS[@]}" \
   --output-dir "$OUT" \
   --sample-size "$SAMPLE_SIZE" \
   --responses-per-prompt "$RESPONSES_PER_PROMPT" \
@@ -51,6 +70,7 @@ echo "shard 1: GPU=$GPU1 log=$LOG_DIR/shard1.log"
 CUDA_VISIBLE_DEVICES="$GPU1" .venv/bin/python scripts/rollout_math_sft.py \
   --mode shard \
   --model "$MODEL" \
+  "${EXTRA_ARGS[@]}" \
   --output-dir "$OUT" \
   --sample-size "$SAMPLE_SIZE" \
   --responses-per-prompt "$RESPONSES_PER_PROMPT" \

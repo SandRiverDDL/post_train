@@ -35,6 +35,7 @@ data/
 unsloth_compiled_cache/
 pictures
 wandb/
+mlruns/
 .runtime/
 *.tar.gz
 .git

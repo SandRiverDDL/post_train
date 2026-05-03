@@ -17,6 +17,7 @@ from post_train.lightning_opd import (
     run_lightning_opd_shard,
     run_lightning_opd_teacher_shard,
 )
+from post_train.tracking import log_data_artifacts, log_data_result, start_run
 
 
 def _override(base: dict[str, Any], args: argparse.Namespace, key: str) -> None:
@@ -50,6 +51,7 @@ def resolve_config(args: argparse.Namespace) -> argparse.Namespace:
     ]:
         _override(values, args, key)
     values["mode"] = args.mode
+    values["config"] = args.config
     values["raw_rollout_dir"] = args.raw_rollout_dir
     values["shard_index"] = args.shard_index
     for nullable_key in ["student_base_model", "tokenizer_name"]:
@@ -86,54 +88,63 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = resolve_config(parse_args())
-    if args.mode == "prompts":
-        result = build_lightning_opd_prompts(
-            prompt_source=args.prompt_source,
-            output_dir=args.output_dir,
-            sample_size=args.sample_size,
-            seed=args.seed,
-        )
-    elif args.mode == "shard":
-        if args.shard_index is None:
-            raise ValueError("shard 模式必须传 --shard-index。")
-        result = run_lightning_opd_shard(
-            output_dir=args.output_dir,
-            num_shards=args.num_shards,
-            shard_index=args.shard_index,
-            student_model=args.student_model,
-            student_base_model=args.student_base_model,
-            teacher_model=args.teacher_model,
-            tokenizer_name=args.tokenizer_name,
-            max_new_tokens=args.max_new_tokens,
-            max_model_len=args.max_model_len,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            top_k=args.top_k,
-            teacher_batch_size=args.teacher_batch_size,
-            gpu_memory_utilization=args.gpu_memory_utilization,
-            teacher_load_in_4bit=args.teacher_load_in_4bit,
-        )
-    elif args.mode == "teacher":
-        if args.shard_index is None:
-            raise ValueError("teacher 模式必须传 --shard-index。")
-        result = run_lightning_opd_teacher_shard(
-            output_dir=args.output_dir,
-            raw_rollout_dir=args.raw_rollout_dir,
-            num_shards=args.num_shards,
-            shard_index=args.shard_index,
-            teacher_model=args.teacher_model,
-            tokenizer_name=args.tokenizer_name,
-            top_k=args.top_k,
-            max_model_len=args.max_model_len,
-            teacher_batch_size=args.teacher_batch_size,
-            teacher_load_in_4bit=args.teacher_load_in_4bit,
-        )
-    else:
-        result = merge_lightning_opd_shards(
-            output_dir=args.output_dir,
-            num_shards=args.num_shards,
-            raw_rollout_dir=args.raw_rollout_dir,
-        )
+    with start_run(
+        run_name=f"lightning-opd-data-{args.mode}",
+        route="lightning_opd_data",
+        config_path=getattr(args, "config", None),
+        output_dir=args.output_dir,
+        params=vars(args),
+    ):
+        if args.mode == "prompts":
+            result = build_lightning_opd_prompts(
+                prompt_source=args.prompt_source,
+                output_dir=args.output_dir,
+                sample_size=args.sample_size,
+                seed=args.seed,
+            )
+        elif args.mode == "shard":
+            if args.shard_index is None:
+                raise ValueError("shard 模式必须传 --shard-index。")
+            result = run_lightning_opd_shard(
+                output_dir=args.output_dir,
+                num_shards=args.num_shards,
+                shard_index=args.shard_index,
+                student_model=args.student_model,
+                student_base_model=args.student_base_model,
+                teacher_model=args.teacher_model,
+                tokenizer_name=args.tokenizer_name,
+                max_new_tokens=args.max_new_tokens,
+                max_model_len=args.max_model_len,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                top_k=args.top_k,
+                teacher_batch_size=args.teacher_batch_size,
+                gpu_memory_utilization=args.gpu_memory_utilization,
+                teacher_load_in_4bit=args.teacher_load_in_4bit,
+            )
+        elif args.mode == "teacher":
+            if args.shard_index is None:
+                raise ValueError("teacher 模式必须传 --shard-index。")
+            result = run_lightning_opd_teacher_shard(
+                output_dir=args.output_dir,
+                raw_rollout_dir=args.raw_rollout_dir,
+                num_shards=args.num_shards,
+                shard_index=args.shard_index,
+                teacher_model=args.teacher_model,
+                tokenizer_name=args.tokenizer_name,
+                top_k=args.top_k,
+                max_model_len=args.max_model_len,
+                teacher_batch_size=args.teacher_batch_size,
+                teacher_load_in_4bit=args.teacher_load_in_4bit,
+            )
+        else:
+            result = merge_lightning_opd_shards(
+                output_dir=args.output_dir,
+                num_shards=args.num_shards,
+                raw_rollout_dir=args.raw_rollout_dir,
+            )
+        log_data_result(result, artifact_name=f"{args.mode}.json")
+        log_data_artifacts([Path(args.output_dir) / "report.json"], artifact_path="data")
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

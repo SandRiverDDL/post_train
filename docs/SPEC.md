@@ -69,6 +69,8 @@
   - 长度上限
   - 多 seed 策略
   - benchmark 口径
+- 把 verl OPD 的两卡资源效率优化作为当前主线工程目标；OPD 当前只作为候选路线先跑 smoke / 小规模验证
+- 在 verl OPD baseline 尚未跑通前启用 vLLM 量化、teacher 量化或 FSDP 4bit/QLoRA 训练
 
 ## 当前模型与评测口径
 
@@ -103,3 +105,16 @@
 
 - `configs/<workflow>/*.yaml` 仍是可执行参数真源
 - `SPEC.md` 只保留当前推荐实验口径与边界，不逐项同步所有实现细节
+
+## verl OPD 当前推荐口径
+
+- 当前只要求先跑通标准 verl OPD small/smoke，不把两卡效率作为第一优化目标。
+- 默认资源建议：
+  - `actor + student vLLM` 同卡
+  - `teacher vLLM` 独占另一张卡
+  - `STUDENT_GPU_MEMORY_UTILIZATION=0.55` 起步，稳定后最多逐步试 `0.60`
+  - `TEACHER_GPU_MEMORY_UTILIZATION=0.70`
+- 默认精度建议：
+  - actor、student vLLM、teacher vLLM 均先使用 BF16
+  - 不把 vLLM 量化或 actor 4bit 训练作为当前 baseline
+- 当前不假设 `actor` 与 `student vLLM` 能共享同一份 base 权重显存；LoRA 只减少训练参数和同步负担，不消除两份运行时权重/状态的显存成本。

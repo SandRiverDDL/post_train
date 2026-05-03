@@ -60,6 +60,46 @@ class SFTSelectionTest(unittest.TestCase):
         self.assertEqual(cfg.loss_mode, "opsft")
         self.assertFalse(cfg.profit_enabled)
 
+    def test_load_sft_config_supports_dft_loss_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "dft.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "model_name: /tmp/model",
+                        "train_dataset: data/stage1/train.jsonl",
+                        "output_dir: outputs/stage1_dft",
+                        "epochs: 1",
+                        "loss_mode: dft",
+                        "profit_enabled: false",
+                        'save_strategy: "no"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            cfg = load_sft_config(config_path)
+
+        self.assertEqual(cfg.loss_mode, "dft")
+        self.assertFalse(cfg.profit_enabled)
+
+    def test_load_sft_config_rejects_dft_with_profit_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "dft_profit.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "model_name: /tmp/model",
+                        "train_dataset: data/stage1/train.jsonl",
+                        "output_dir: outputs/stage1_dft",
+                        "loss_mode: dft",
+                        "profit_enabled: true",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "dft 与 profit_enabled 不能同时开启"):
+                load_sft_config(config_path)
+
     def test_scan_checkpoint_dirs_sorts_by_global_step(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_dir = Path(tmp_dir)

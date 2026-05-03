@@ -91,12 +91,22 @@
 - `on_policy/`
   - on-policy loop、query strategy、数据构造与 trainset 构造统一收口到子包
   - 旧的顶层 `on_policy_*` 兼容导出已删除，项目内入口直接依赖 `post_train.on_policy.*`
+- `rollout/`
+  - `common.py` 收口 shard 切分、长度统计与 chat template 渲染等通用逻辑
+  - `teacher_sft.py` 只负责教师模型生成 SFT raw rollout，输出 `prompts.jsonl`、shard raw、merge raw 与统计 report
+  - Lightning-OPD 不再承载教师 SFT rollout 生成；它只复用 raw rollout 做 teacher forward / topK logprob 与 OPD 数据构造
 - `workflow.py`
   - 单轮实验编排层
   - 训练 -> dev 选 best checkpoint -> benchmark -> baseline 对比
   - workflow summary / failure summary 落盘
 - `on_policy/`、`simpo.py`、`datasets/simpo.py`、`datasets/stage2_*`
   - 保留为旧路线或候选路线模块，不是当前主线
+- `verl_opd/`
+  - 负责把本项目 candidate 池与本地 DAPO-17K parquet 转成 verl RLHF parquet schema
+  - `scripts/prepare_verl_opd_data.py` 只做 CLI 编排
+  - 当前支持纯 DAPO smoke 与 candidate:DAPO = 1:4 的 1K 混合数据
+  - OPD 训练本体在兄弟仓库 `../verl` 中运行
+  - 当前不在本仓库中实现 verl 训练调度；本仓库只维护数据准备、启动口径与结果记录
 
 ## 主链路
 
@@ -211,7 +221,60 @@ result.json
 - leaderboard 只展示 metadata 显式跟踪的模型
 - dev-only 结果保留在 Task Details，不进入 Main Results
 
-### 5. on-policy SFT（历史路线）
+### 5. MLflow 实验索引
+
+输入：
+
+- 训练入口的配置、参数与 Trainer 日志
+- 数据准备入口的 report 与输出路径
+- 评测入口的 `result.json` 与指标
+
+输出：
+
+- `mlruns/` 本地 MLflow store
+- `outputs/<run>/mlflow_run.json`
+
+说明：
+
+- MLflow 只保存参数、指标、小型 JSON artifact 和大文件路径
+- checkpoint、raw eval、rollout JSONL 与 teacher logits 仍以 `outputs/`、`data/` 为真实存储
+- 评测时若模型目录存在 `mlflow_run.json`，指标写回同一个训练 run
+- 详细操作看 `docs/runbooks/mlflow.md`
+
+### 6. verl OPD（候选路线）
+
+输入：
+
+- 本项目准备的 verl parquet 数据
+- `outputs/stage1_mix_long_sft/checkpoint-300` adapter
+- student base 与 teacher 模型
+
+输出：
+
+- verl 训练 checkpoint
+- OPD 训练指标
+- 后续通过本项目 `scripts/eval_model.py` 统一评测的结果
+
+流程：
+
+parquet prompt batch
+-> student vLLM rollout
+-> teacher vLLM 计算 teacher logprob
+-> replay buffer
+-> sleep student rollout
+-> actor/FSDP 前向与更新
+-> actor weights/adapter 同步回 student vLLM
+
+说明：
+
+- 当前标准 verl OPD 使用 `actor + student rollout` hybrid 资源池，teacher 由单独 `teacher_pool` 常驻管理。
+- `actor` 与 `student vLLM` 语义上是同一个 base model，但显存中不是同一份 CUDA tensor；actor 用 HF/FSDP 训练权重，student vLLM 用推理引擎内部权重与 KV cache，二者通过 `update_weights` 同步。
+- LoRA 训练只减少可训练参数与同步负担，不代表 actor 只占 adapter 显存；base 权重仍参与 actor 前向/反向，也在 student vLLM 中有推理副本。
+- 当前两卡推荐调度是 `actor + student vLLM` 同卡、`teacher vLLM` 单独一张卡。teacher 可较高 utilization，student 需要给 actor/FSDP、weight sync 与临时 buffer 留余量。
+- vLLM sleep 只能在对应阶段释放显存，不能降低 vLLM 初始化时的 `gpu_memory_utilization` 预算要求；把 student vLLM 与 teacher vLLM 同卡需要改 OPD 数据流，把 teacher scoring 延后到 batch 级并显式 sleep/wake。
+- 当前 OPD baseline 统一使用 BF16；vLLM 量化和 FSDP 4bit/QLoRA 暂不作为默认架构假设。
+
+### 7. on-policy SFT（历史路线）
 
 输入：
 
@@ -229,7 +292,7 @@ result.json
 - 该路线当前保留，但不再是主线
 - 文档仍保留，供后续对照或回退时参考
 
-### 6. 两阶段 SFT / SIMPO（候选路线）
+### 8. 两阶段 SFT / SIMPO（候选路线）
 
 输入：
 

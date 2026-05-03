@@ -9,6 +9,7 @@ from typing import Any
 from post_train.answers import evaluate_prediction
 from post_train.io import ensure_parent, read_jsonl, write_jsonl
 from post_train.prompts import build_eval_prompt
+from post_train.rollout.common import select_shard_rows, shard_suffix
 
 
 DEFAULT_PROMPT_SOURCE = Path("data/on_policy_loop/query_strategy/candidate_pool.jsonl")
@@ -48,18 +49,6 @@ def _length_stats(values: list[int]) -> dict[str, Any]:
         "p99": _percentile(values, 0.99),
         "max": max(values),
     }
-
-
-def shard_suffix(shard_index: int, num_shards: int) -> str:
-    return f"shard{shard_index}-of-{num_shards}"
-
-
-def select_shard_rows(rows: list[dict[str, Any]], *, num_shards: int, shard_index: int) -> list[dict[str, Any]]:
-    if num_shards < 1:
-        raise ValueError(f"num_shards 必须 >= 1，实际为 {num_shards}")
-    if shard_index < 0 or shard_index >= num_shards:
-        raise ValueError(f"shard_index 必须在 [0, {num_shards})，实际为 {shard_index}")
-    return [row for index, row in enumerate(rows) if index % num_shards == shard_index]
 
 
 def build_lightning_opd_prompts(

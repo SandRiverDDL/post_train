@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.config import load_stage2_mix_long_data_config
-from post_train.datasets.stage2_mix_long import prepare_stage2_mix_long_dataset
+from post_train.datasets.stage2_mix_long import make_mix_long_record, prepare_stage2_mix_long_dataset
 
 
 class FakeTokenizer:
@@ -41,6 +41,38 @@ class Stage2MixLongDataTest(unittest.TestCase):
         self.assertEqual(cfg.seed, 7)
         self.assertEqual(cfg.max_solution_tokens, 1024)
         self.assertEqual(cfg.sample_size, 10)
+
+    def test_make_mix_long_record_keeps_existing_boxed(self) -> None:
+        record = make_mix_long_record(
+            {
+                "id": "boxed",
+                "question": "1+1=?",
+                "solution": "Reasoning\n\n**Final Answer**\n\n\\[\\boxed{2}\\]",
+                "final_answer": "2",
+            },
+            0,
+            source="demo/mix-long",
+        )
+
+        self.assertEqual(record["solution"].count("\\boxed{"), 1)
+        self.assertIn("\\[\\boxed{2}\\]", record["solution"])
+        self.assertEqual(record["meta"]["normalization_action"], "kept_existing_boxed")
+
+    def test_make_mix_long_record_appends_bare_boxed_only_when_missing(self) -> None:
+        record = make_mix_long_record(
+            {
+                "id": "missing",
+                "question": "1+1=?",
+                "solution": "Reasoning gives 2.",
+                "final_answer": "2",
+            },
+            0,
+            source="demo/mix-long",
+        )
+
+        self.assertTrue(record["solution"].endswith("\n\n\\boxed{2}"))
+        self.assertEqual(record["solution"].count("\\boxed{"), 1)
+        self.assertEqual(record["meta"]["normalization_action"], "appended_missing_boxed")
 
     def test_prepare_stage2_mix_long_dataset_filters_too_long_solution(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -38,6 +38,26 @@ class WhitespaceTokenizer:
         return {"input_ids": list(range(1, len(pieces) + 1))}
 
 
+class RecordingChatTokenizer:
+    chat_template = "dummy"
+
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+
+    def apply_chat_template(self, messages, *, tokenize: bool, add_generation_prompt: bool) -> str:
+        rendered = ""
+        for message in messages:
+            rendered += f"<|im_start|>{message['role']}\n{message['content']}<|im_end|>\n"
+        if add_generation_prompt:
+            rendered += "<|im_start|>assistant\n"
+        return rendered
+
+    def __call__(self, text: str, *, add_special_tokens: bool) -> dict[str, list[int]]:
+        self.texts.append(text)
+        pieces = [piece for piece in text.split() if piece]
+        return {"input_ids": list(range(1, len(pieces) + 1))}
+
+
 class SFTTokenizationTest(unittest.TestCase):
     def test_tokenize_prompt_completion_handles_boundary_merge(self) -> None:
         tokenizer = BoundaryMergingTokenizer()
@@ -67,6 +87,29 @@ class SFTTokenizationTest(unittest.TestCase):
         row = dataset[0]
         self.assertIn("length", row)
         self.assertEqual(row["length"], len(row["input_ids"]))
+
+    def test_build_train_dataset_can_render_justrl_chat_prompt(self) -> None:
+        tokenizer = RecordingChatTokenizer()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dataset_path = Path(tmp_dir) / "train.jsonl"
+            dataset_path.write_text(
+                '{"id":"1","question":"What is 1+1?","solution":"Reasoning\\\\n\\\\n\\\\boxed{2}","final_answer":"2"}\n',
+                encoding="utf-8",
+            )
+            build_train_dataset(
+                dataset_path,
+                tokenizer,
+                max_length=64,
+                prompt_style="justrl_math",
+                use_chat_template=True,
+                system_prompt="",
+            )
+
+        rendered_prompt = tokenizer.texts[0]
+        self.assertIn("<|im_start|>system\n<|im_end|>", rendered_prompt)
+        self.assertIn("What is 1+1?", rendered_prompt)
+        self.assertIn("Please reason step by step, and put your final answer within \\boxed{}.", rendered_prompt)
+        self.assertTrue(rendered_prompt.endswith("<|im_start|>assistant\n"))
 
 
 class SFTProfitLossTest(unittest.TestCase):
@@ -129,6 +172,56 @@ class SFTProfitLossTest(unittest.TestCase):
         self.assertEqual(metrics["valid_tokens"], 2.0)
         self.assertEqual(metrics["kept_tokens"], 1.0)
         self.assertEqual(metrics["filtered_tokens"], 1.0)
+
+    def test_compute_sft_loss_supports_dft_gold_probability_weighting(self) -> None:
+        logits = torch.tensor(
+            [
+                [
+                    [0.0, 3.0, 0.0],
+                    [3.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        labels = torch.tensor([[-100, 1, 2]], dtype=torch.long)
+
+        loss, metrics = _compute_sft_loss(
+            logits,
+            labels,
+            loss_mode="dft",
+            profit_enabled=False,
+            profit_threshold=0.1,
+        )
+
+        shift_logits = logits[..., :-1, :]
+        shift_labels = labels[..., 1:]
+        log_probs = torch.nn.functional.log_softmax(shift_logits, dim=-1)
+        token_nll = -log_probs.gather(dim=-1, index=shift_labels.unsqueeze(-1)).squeeze(-1)
+        gold_prob = torch.exp(-token_nll.detach())
+        expected = (gold_prob * token_nll).mean()
+        self.assertAlmostEqual(loss.item(), expected.item(), places=6)
+        self.assertLess(loss.item(), token_nll.mean().item())
+        self.assertEqual(metrics["valid_tokens"], 2.0)
+        self.assertEqual(metrics["kept_tokens"], 2.0)
+        self.assertEqual(metrics["filtered_tokens"], 0.0)
+        self.assertAlmostEqual(metrics["dft_loss_scale"], gold_prob.mean().item(), places=6)
+
+    def test_compute_sft_loss_dft_returns_zero_for_empty_batch(self) -> None:
+        logits = torch.zeros((1, 3, 4), dtype=torch.float32)
+        labels = torch.full((1, 3), -100, dtype=torch.long)
+
+        loss, metrics = _compute_sft_loss(
+            logits,
+            labels,
+            loss_mode="dft",
+            profit_enabled=False,
+            profit_threshold=0.1,
+        )
+
+        self.assertEqual(loss.item(), 0.0)
+        self.assertEqual(metrics["valid_tokens"], 0.0)
+        self.assertEqual(metrics["empty_batches"], 1.0)
 
     def test_compute_sft_loss_returns_zero_when_all_supervised_tokens_are_filtered(self) -> None:
         logits = torch.tensor(

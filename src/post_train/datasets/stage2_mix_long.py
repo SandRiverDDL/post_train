@@ -5,9 +5,11 @@ import random
 from pathlib import Path
 from typing import Any
 
+from post_train.answers import are_equivalent, extract_final_answer, extract_relaxed_final_answer, has_boxed_final_answer
 from post_train.config import Stage2MixLongDataConfig
-from post_train.data import load_dataset_rows, make_sft_record, summarize_sft_dataset
+from post_train.data import clean_solution_text, load_dataset_rows, summarize_sft_dataset
 from post_train.io import ensure_parent, write_jsonl
+from post_train.schemas import SFTRecord
 
 
 def _write_json(path: str | Path, payload: dict[str, Any]) -> Path:
@@ -34,6 +36,57 @@ def _length_stats(lengths: list[int]) -> dict[str, int]:
     }
 
 
+def _first_present(row: dict[str, Any], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _row_id(row: dict[str, Any], fallback_index: int) -> str:
+    for key in ("id", "problem_id", "uuid"):
+        value = row.get(key)
+        if value is not None:
+            return str(value)
+    return str(fallback_index)
+
+
+def make_mix_long_record(row: dict[str, Any], index: int, *, source: str) -> dict[str, Any]:
+    question = _first_present(row, ("problem", "question", "query", "prompt"))
+    raw_solution = clean_solution_text(_first_present(row, ("solution", "response", "completion")))
+    final_answer = _first_present(row, ("final_answer", "answer"))
+    if not final_answer:
+        final_answer = extract_relaxed_final_answer(raw_solution) or ""
+
+    solution = raw_solution
+    boxed = has_boxed_final_answer(solution)
+    parsed_answer = extract_final_answer(solution) or ""
+    if boxed and final_answer and parsed_answer and not are_equivalent(parsed_answer, final_answer):
+        normalization_action = "kept_existing_boxed_mismatch"
+    elif boxed:
+        normalization_action = "kept_existing_boxed"
+    elif final_answer:
+        solution = f"{solution.rstrip()}\n\n\\boxed{{{final_answer}}}" if solution.strip() else f"\\boxed{{{final_answer}}}"
+        normalization_action = "appended_missing_boxed"
+    else:
+        normalization_action = "missing_answer"
+
+    normalized_final_answer = extract_relaxed_final_answer(solution) or final_answer
+    record = SFTRecord(
+        id=_row_id(row, index),
+        question=question,
+        solution=solution,
+        final_answer=normalized_final_answer,
+        meta={
+            "source": source,
+            "source_dataset": source,
+            "normalization_action": normalization_action,
+        },
+    )
+    return record.model_dump()
+
+
 def prepare_stage2_mix_long_dataset(cfg: Stage2MixLongDataConfig) -> dict[str, Any]:
     from transformers import AutoTokenizer
 
@@ -52,11 +105,12 @@ def prepare_stage2_mix_long_dataset(cfg: Stage2MixLongDataConfig) -> dict[str, A
     raw_solution_lengths: list[int] = []
     kept_solution_lengths: list[int] = []
     filtered_too_long = 0
+    normalization_actions: dict[str, int] = {}
 
     for index, row in enumerate(raw_rows):
-        record = make_sft_record(row, index, source=cfg.dataset_name)
-        record.setdefault("meta", {})
-        record["meta"]["source_dataset"] = cfg.dataset_name
+        record = make_mix_long_record(row, index, source=cfg.dataset_name)
+        action = str(record.get("meta", {}).get("normalization_action", "unknown"))
+        normalization_actions[action] = normalization_actions.get(action, 0) + 1
         solution = str(record.get("solution", "") or "")
         solution_tokens = len(tokenizer(solution, add_special_tokens=False)["input_ids"])
         raw_solution_lengths.append(solution_tokens)
@@ -93,6 +147,7 @@ def prepare_stage2_mix_long_dataset(cfg: Stage2MixLongDataConfig) -> dict[str, A
         "filters": {
             "filtered_too_long_solution": filtered_too_long,
         },
+        "normalization": normalization_actions,
         "solution_tokens": {
             "raw": _length_stats(raw_solution_lengths),
             "kept": _length_stats(kept_solution_lengths),

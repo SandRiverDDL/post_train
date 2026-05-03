@@ -11,6 +11,7 @@
 - `data/`
 - `outputs/`
 - `wandb/`
+- `mlruns/`
 
 ## 当前必须迁移的实验产物
 
@@ -34,3 +35,5 @@
 ## 推荐方式
 
 使用 `rsync -avh --progress` 同步被 Git 忽略的目录。
+
+若目标服务器需要继续查看或追加 MLflow 实验记录，也要同步 `mlruns/`。

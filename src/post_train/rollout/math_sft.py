@@ -11,6 +11,7 @@ from post_train.answers import evaluate_prediction
 from post_train.data import load_dataset_rows, make_sft_record, sample_rows
 from post_train.io import ensure_parent, read_jsonl, write_jsonl
 from post_train.prompts import build_eval_prompt
+from post_train.rollout.common import select_shard_rows, shard_suffix
 from post_train.schemas import SFTRecord
 
 DEFAULT_MATH_DATASET = "EleutherAI/hendrycks_math"
@@ -33,18 +34,6 @@ def _write_json(path: str | Path, payload: dict[str, Any]) -> Path:
     return output_path
 
 
-def shard_suffix(shard_index: int, num_shards: int) -> str:
-    return f"shard{shard_index}-of-{num_shards}"
-
-
-def select_shard_rows(rows: list[dict[str, Any]], *, num_shards: int, shard_index: int) -> list[dict[str, Any]]:
-    if num_shards < 1:
-        raise ValueError(f"num_shards 必须 >= 1，实际为 {num_shards}")
-    if shard_index < 0 or shard_index >= num_shards:
-        raise ValueError(f"shard_index 必须在 [0, {num_shards})，实际为 {shard_index}")
-    return [row for index, row in enumerate(rows) if index % num_shards == shard_index]
-
-
 def parse_level(value: Any) -> int | None:
     if isinstance(value, int):
         return value
@@ -60,6 +49,26 @@ def _output_tokens(text: str) -> int:
     if not stripped:
         return 0
     return len(stripped.split())
+
+
+def apply_chat_template(
+    prompt: str,
+    *,
+    tokenizer_name: str,
+    system_prompt: str | None = None,
+    assistant_prefill: str | None = None,
+) -> str:
+    from transformers import AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
+    if not tokenizer.chat_template:
+        return prompt + (assistant_prefill or "")
+    messages: list[dict[str, str]] = []
+    if system_prompt is not None:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+    rendered = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    return rendered + (assistant_prefill or "")
 
 
 def build_math_query_pool(
@@ -150,6 +159,10 @@ def sample_math_responses(
     query_rows: list[dict[str, Any]],
     *,
     model: str,
+    tokenizer_name: str | None = None,
+    use_chat_template: bool = False,
+    system_prompt: str | None = None,
+    assistant_prefill: str | None = None,
     responses_per_prompt: int,
     temperature: float,
     top_p: float,
@@ -160,7 +173,19 @@ def sample_math_responses(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     from vllm import LLM, SamplingParams
 
-    prompts = [build_eval_prompt(str(row["question"])) for row in query_rows]
+    base_prompts = [build_eval_prompt(str(row["question"])) for row in query_rows]
+    template_tokenizer_name = tokenizer_name or model
+    prompts = [
+        apply_chat_template(
+            prompt,
+            tokenizer_name=template_tokenizer_name,
+            system_prompt=system_prompt,
+            assistant_prefill=assistant_prefill,
+        )
+        if use_chat_template
+        else prompt + (assistant_prefill or "")
+        for prompt in base_prompts
+    ]
     llm = LLM(
         model=model,
         trust_remote_code=trust_remote_code,
@@ -214,6 +239,7 @@ def sample_math_responses(
                 "question": str(row.get("question", "")),
                 "final_answer": str(row.get("final_answer", "")),
                 "prompt": prompt,
+                "base_prompt": base_prompts[len(raw_samples)],
                 "responses": responses,
                 "meta": dict(row.get("meta", {})),
             }
@@ -222,6 +248,10 @@ def sample_math_responses(
     avg_output_tokens = sum(output_token_counts) / len(output_token_counts) if output_token_counts else 0.0
     return raw_samples, {
         "model": model,
+        "tokenizer_name": template_tokenizer_name,
+        "use_chat_template": use_chat_template,
+        "system_prompt": system_prompt,
+        "assistant_prefill": assistant_prefill,
         "prompt_count": len(query_rows),
         "responses_per_prompt": responses_per_prompt,
         "response_count": response_count,
@@ -401,6 +431,10 @@ def sample_mix_long_rows(
 def prepare_math_rollout_sft_dataset(
     *,
     model: str,
+    tokenizer_name: str | None = None,
+    use_chat_template: bool = False,
+    system_prompt: str | None = None,
+    assistant_prefill: str | None = None,
     output_dir: str | Path,
     sample_size: int | None = 1500,
     responses_per_prompt: int = 8,
@@ -461,6 +495,10 @@ def prepare_math_rollout_sft_dataset(
     raw_samples, sampling_report = sample_math_responses(
         query_rows,
         model=model,
+        tokenizer_name=tokenizer_name,
+        use_chat_template=use_chat_template,
+        system_prompt=system_prompt,
+        assistant_prefill=assistant_prefill,
         responses_per_prompt=responses_per_prompt,
         temperature=temperature,
         top_p=top_p,

@@ -31,8 +31,12 @@ class SFTTrainConfig(BaseModel):
     max_grad_norm: float = Field(default=1.0, ge=0.0)
     logging_steps: int = Field(default=5, ge=1)
     group_by_length: bool = True
+    prompt_style: Literal["default", "justrl_math"] = "default"
+    use_chat_template: bool = False
+    system_prompt: str | None = None
+    assistant_prefill: str | None = None
     backend: Literal["unsloth", "trl_peft"] = "unsloth"
-    loss_mode: Literal["standard", "opsft", "lightning_opd"] = "standard"
+    loss_mode: Literal["standard", "dft", "opsft", "lightning_opd"] = "standard"
     profit_enabled: bool = False
     profit_threshold: float = Field(default=0.1, gt=0.0, lt=1.0)
     distill_top_k: int = Field(default=1, ge=1)
@@ -47,6 +51,8 @@ class SFTTrainConfig(BaseModel):
     def _validate_loss_mode(self) -> "SFTTrainConfig":
         if self.loss_mode == "opsft" and self.profit_enabled:
             raise ValueError("opsft 与 profit_enabled 不能同时开启。")
+        if self.loss_mode == "dft" and self.profit_enabled:
+            raise ValueError("dft 与 profit_enabled 不能同时开启。")
         if self.loss_mode == "lightning_opd" and self.profit_enabled:
             raise ValueError("lightning_opd 与 profit_enabled 不能同时开启。")
         if self.loss_mode != "lightning_opd" and (

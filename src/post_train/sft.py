@@ -10,7 +10,8 @@ from torch.nn import functional as F
 
 from post_train.data import clean_solution_text
 from post_train.io import ensure_parent, read_jsonl
-from post_train.prompts import build_sft_prompt
+from post_train.prompts import build_math_prompt, build_sft_prompt, render_chat_prompt
+from post_train.tracking import create_trainer_callback
 
 
 def _tokenize_prompt_completion(
@@ -36,11 +37,29 @@ def _tokenize_prompt_completion(
     }
 
 
-def build_train_dataset(path: str | Path, tokenizer: Any, *, max_length: int) -> Dataset:
+def build_train_dataset(
+    path: str | Path,
+    tokenizer: Any,
+    *,
+    max_length: int,
+    prompt_style: str = "default",
+    use_chat_template: bool = False,
+    system_prompt: str | None = None,
+    assistant_prefill: str | None = None,
+) -> Dataset:
     rows = read_jsonl(path)
     tokenized_rows: list[dict[str, list[int]]] = []
     for row in rows:
-        prompt = build_sft_prompt(str(row["question"]))
+        prompt = build_math_prompt(str(row["question"]), style=prompt_style)  # type: ignore[arg-type]
+        if use_chat_template:
+            prompt = render_chat_prompt(
+                tokenizer,
+                prompt,
+                system_prompt=system_prompt,
+                assistant_prefill=assistant_prefill,
+            )
+        elif assistant_prefill:
+            prompt += assistant_prefill
         completion = clean_solution_text(str(row["solution"]))
         tokenized_rows.append(
             _tokenize_prompt_completion(
@@ -201,10 +220,33 @@ def _compute_sft_loss(
             "filtered_tokens": 0.0,
             "empty_batches": 1.0 if effective_sample_count == 0 else 0.0,
             "avg_gold_prob": 0.0,
+            "dft_loss_scale": 0.0,
             "opsft_batch_max_completion_tokens": float(batch_max_completion),
             "opsft_avg_completion_tokens": avg_completion_tokens,
             "opsft_effective_sample_count": float(effective_sample_count),
             "opsft_zero_completion_batches": 1.0 if effective_sample_count == 0 else 0.0,
+        }
+
+    valid_count = int(valid_mask.sum().item())
+    if loss_mode == "dft":
+        if valid_count == 0:
+            loss = logits.sum() * 0.0
+            avg_gold_prob = 0.0
+        else:
+            token_loss = gold_prob * token_nll
+            loss = (token_loss * valid_mask.to(token_loss.dtype)).sum() / valid_mask.sum().to(token_loss.dtype)
+            avg_gold_prob = float(gold_prob[valid_mask].mean().item())
+        return loss, {
+            "valid_tokens": float(valid_count),
+            "kept_tokens": float(valid_count),
+            "filtered_tokens": 0.0,
+            "empty_batches": 1.0 if valid_count == 0 else 0.0,
+            "avg_gold_prob": avg_gold_prob,
+            "dft_loss_scale": avg_gold_prob,
+            "opsft_batch_max_completion_tokens": 0.0,
+            "opsft_avg_completion_tokens": 0.0,
+            "opsft_effective_sample_count": 0.0,
+            "opsft_zero_completion_batches": 0.0,
         }
 
     keep_mask = valid_mask
@@ -212,7 +254,6 @@ def _compute_sft_loss(
         keep_mask = valid_mask & gold_prob.ge(profit_threshold)
 
     kept_count = int(keep_mask.sum().item())
-    valid_count = int(valid_mask.sum().item())
     if kept_count == 0:
         loss = logits.sum() * 0.0
     else:
@@ -226,6 +267,7 @@ def _compute_sft_loss(
         "filtered_tokens": float(valid_count - kept_count),
         "empty_batches": 1.0 if valid_count > 0 and kept_count == 0 else 0.0,
         "avg_gold_prob": avg_gold_prob,
+        "dft_loss_scale": 0.0,
         "opsft_batch_max_completion_tokens": 0.0,
         "opsft_avg_completion_tokens": 0.0,
         "opsft_effective_sample_count": 0.0,
@@ -420,6 +462,13 @@ class ProfitStatsMixin:
                 self._profit_stats["lightning_opd_student_logprob_sum"] / step_count
             )
             logs["lightning_opd_distill_top_k"] = float(self.distill_top_k)
+        elif self.loss_mode == "dft" and self._profit_stats["valid_tokens"] > 0:
+            logs = dict(logs)
+            kept_tokens = self._profit_stats["kept_tokens"]
+            logs["dft_valid_tokens"] = self._profit_stats["valid_tokens"]
+            logs["dft_avg_gold_prob"] = (
+                self._profit_stats["avg_gold_prob_weighted_sum"] / kept_tokens if kept_tokens > 0 else 0.0
+            )
         elif self.loss_mode == "opsft" and self._profit_stats["step_count"] > 0:
             logs = dict(logs)
             step_count = self._profit_stats["step_count"]
@@ -518,7 +567,15 @@ def _train_sft_unsloth(cfg) -> Path:
         )
         data_collator = LightningOPDDataCollator(pad_token_id=tokenizer.pad_token_id)
     else:
-        train_dataset = build_train_dataset(cfg.train_dataset, tokenizer, max_length=cfg.max_seq_length)
+        train_dataset = build_train_dataset(
+            cfg.train_dataset,
+            tokenizer,
+            max_length=cfg.max_seq_length,
+            prompt_style=cfg.prompt_style,
+            use_chat_template=cfg.use_chat_template,
+            system_prompt=cfg.system_prompt,
+            assistant_prefill=cfg.assistant_prefill,
+        )
         data_collator = None
 
     model = FastLanguageModel.get_peft_model(
@@ -549,6 +606,9 @@ def _train_sft_unsloth(cfg) -> Path:
         topk_kd_weight=cfg.topk_kd_weight,
         opd_weight=cfg.opd_weight,
     )
+    mlflow_callback = create_trainer_callback()
+    if mlflow_callback is not None:
+        trainer.add_callback(mlflow_callback)
     trainer.train()
     output_dir = ensure_parent(cfg.output_dir / "placeholder.txt").parent
     if cfg.export_final_model:
@@ -633,7 +693,15 @@ def _train_sft_trl_peft(cfg) -> Path:
         )
         data_collator = LightningOPDDataCollator(pad_token_id=tokenizer.pad_token_id)
     else:
-        train_dataset = build_train_dataset(cfg.train_dataset, tokenizer, max_length=cfg.max_seq_length)
+        train_dataset = build_train_dataset(
+            cfg.train_dataset,
+            tokenizer,
+            max_length=cfg.max_seq_length,
+            prompt_style=cfg.prompt_style,
+            use_chat_template=cfg.use_chat_template,
+            system_prompt=cfg.system_prompt,
+            assistant_prefill=cfg.assistant_prefill,
+        )
         data_collator = None
     training_args = _build_training_args(cfg, tokenizer)
     trainer = ProfitSFTTrainer(
@@ -649,6 +717,9 @@ def _train_sft_trl_peft(cfg) -> Path:
         topk_kd_weight=cfg.topk_kd_weight,
         opd_weight=cfg.opd_weight,
     )
+    mlflow_callback = create_trainer_callback()
+    if mlflow_callback is not None:
+        trainer.add_callback(mlflow_callback)
     trainer.train()
     output_dir = ensure_parent(cfg.output_dir / "placeholder.txt").parent
     if cfg.export_final_model:

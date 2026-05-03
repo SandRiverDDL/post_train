@@ -1,0 +1,15 @@
+model_name: /mnt/dataY/fsw/cache/huggingface/hub/models--Qwen--Qwen2.5-Math-1.5B/snapshots/4a83ca6e4526a4f2da3aa259ec36c259f66b2ab2
+output_dir: outputs/eval_gen4096
+backend: vllm
+attn_implementation: sdpa
+batch_size: 16
+max_new_tokens: 4096
+max_seq_length: 8192
+device: cuda
+gpu_memory_utilization: 0.70
+max_lora_rank: 32
+
+seed: 42
+tasks:
+  - name: math500
+    dataset_path: data/eval/math500_test.jsonl

@@ -11,32 +11,60 @@ ANSWER_LINE_RE = re.compile(
 )
 BOXED_FINAL_RE = re.compile(r"(?is)final answer\s*:\s*\\boxed\{")
 BOXED_RE = re.compile(r"\\boxed\{")
+LATEX_NORMALIZATION_REPLACEMENTS = {
+    r"\dfrac": r"\frac",
+    r"\tfrac": r"\frac",
+    r"\cfrac": r"\frac",
+    r"\left": "",
+    r"\right": "",
+    r"\,": "",
+    r"\;": "",
+    r"\!": "",
+}
 
 
 def extract_boxed_content(text: str) -> Optional[str]:
-    marker = r"\boxed{"
-    start = text.find(marker)
-    if start == -1:
-        return None
+    contents = extract_boxed_contents(text)
+    return contents[0] if contents else None
 
-    index = start + len(marker)
-    depth = 1
-    chars: list[str] = []
-    while index < len(text):
-        char = text[index]
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return "".join(chars).strip()
-        chars.append(char)
-        index += 1
-    return None
+
+def extract_last_boxed_content(text: str) -> Optional[str]:
+    contents = extract_boxed_contents(text)
+    return contents[-1] if contents else None
+
+
+def extract_boxed_contents(text: str) -> list[str]:
+    marker = r"\boxed{"
+    contents: list[str] = []
+    search_from = 0
+
+    while True:
+        start = text.find(marker, search_from)
+        if start == -1:
+            return contents
+
+        index = start + len(marker)
+        depth = 1
+        chars: list[str] = []
+        closed = False
+        while index < len(text):
+            char = text[index]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    contents.append("".join(chars).strip())
+                    closed = True
+                    break
+            chars.append(char)
+            index += 1
+
+        search_from = index + 1 if closed else start + len(marker)
 
 
 def extract_final_answer(text: str) -> Optional[str]:
-    boxed = extract_boxed_content(text)
+    boxed = extract_last_boxed_content(text)
     if boxed:
         return boxed
 
@@ -67,7 +95,7 @@ def extract_relaxed_final_answer(text: str) -> Optional[str]:
     if not answer:
         return None
     answer = answer.strip("$").strip()
-    return extract_boxed_content(answer) or answer
+    return extract_last_boxed_content(answer) or answer
 
 
 def strip_answer_suffix(solution: str) -> str:
@@ -105,9 +133,9 @@ def normalize_answer(answer: str | None) -> str:
         return ""
 
     normalized = answer.strip()
+    for old, new in LATEX_NORMALIZATION_REPLACEMENTS.items():
+        normalized = normalized.replace(old, new)
     normalized = normalized.replace("$", "")
-    normalized = normalized.replace("\\left", "").replace("\\right", "")
-    normalized = normalized.replace("\\,", "")
     normalized = normalized.replace(" ", "")
     normalized = normalized.rstrip(".")
     normalized = normalized.replace("^", "**")

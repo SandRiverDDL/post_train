@@ -20,6 +20,7 @@
 - 当前评测总表：`docs/analysis/eval_leaderboard.md`
 - 当前评测机器索引：`docs/analysis/eval_registry.jsonl`
 - 当前评测 metadata：`docs/analysis/eval_metadata.yaml`
+- 当前 MLflow 索引：`mlruns/`，默认 backend 为 `sqlite:///mlruns/mlflow.db`
 - 当前 checkpoint 选择输出口径：`<train_output_dir>/dev_eval/dev_ranking.json` 与 `best_checkpoint.json`
 - 当前 `select_sft_checkpoint.py` / `eval_model.py` 已补齐 `model_resolution` 诊断，可明确记录：
   - `pretrained`
@@ -41,12 +42,25 @@
 - 当前 JustRL rollout 初筛暴露明显长度问题：`max_new_tokens=2048` 下 raw response token p50 贴近 2048，存在大量正确 boxed 后继续输出并被截断的轨迹；这类样本不应无过滤地当作高质量 SFT 数据。
 - 当前可用于快速对照的 JustRL/Mix-Long 同题 SFT 数据为 `data/rollout/math_sft/justrl_deepseek_1500/train.rollout_rejection_lt2000_matched321.jsonl` 与 `train.mix_long_lt2000_matched321.jsonl`，筛选口径是 JustRL 正确轨迹 `solution_tokens < 2000` 且能在 Mix-Long 中精确匹配同题 prompt。
 - 当前 JustRL rollout 脚本已支持 `shard -> merge -> select` 一键链路，可用两个独立 vLLM 进程做数据并行；默认 MATH train 全量 7500 题、每题 1 轨迹、`max_model_len=4096`、`max_new_tokens=3650`，主入口为 `runs/rollout/justrl_math_shards.sh`，产物按 `shards/`、`raw/`、`sft/`、`logs/` 分目录保存，总 report 为输出目录根部 `report.json`。
-- JustRL rollout 详细诊断见 `docs/analysis/justrl_rollout_diagnostics.md`：主要问题是 `<think>` 格式不稳定、`double_boxed` 普遍、简单题过度推理、长组合/几何题容易截断，不建议 raw rollout 直接作为 SFT 数据。
+- JustRL / Nemotron 这类 Qwen chat 模型做 rollout 时必须显式使用 tokenizer chat template；裸 prompt 结果只作为弱参考或无效 probe。此前 JustRL-Nemotron probe50 使用 `scripts/rollout_math_sft.py` 裸 prompt，导致 `<think>` / `</think>` 边界不稳定，不能作为该模型真实格式能力结论。
+- 已重跑 JustRL-Nemotron chat-template 50 条 probe：`data/rollout/math_sft/justrl_nemotron_chat_probe50_len8192/raw/raw_samples.merged.jsonl`。`<think>` 从裸 prompt 的 `8/50` 提升到 `50/50`，`</think>` 为 `42/50`；输出平均 `2805.5` tokens，`p95=5071.5`，max `6099`，未命中 `8192` 上限。结论是 chat template 修复了起始格式，但输出仍偏长，不能直接 raw SFT。
+- JustRL rollout 详细诊断见 `docs/analysis/justrl_rollout_diagnostics.md`：主要问题是长推理偏置、`double_boxed` 普遍、简单题过度推理、长组合/几何题容易截断；其中 `<think>` 格式不稳定的结论必须区分是否使用了 chat template，不建议 raw rollout 直接作为 SFT 数据。
+- 当前 JustRL 对齐的 Mix-Long SFT/DFT 小样本数据为 `data/stage1/mix_long_justrl_chat_lt2048_random2000/train.jsonl`：Mix-Long 归一化保留原有 boxed，只有缺 boxed 时追加裸 `\boxed{...}`；随后按 `justrl_math` prompt、`use_chat_template=true`、`system_prompt=""` 计算 `prompt + solution <= 2048` 后 seed=42 随机抽 2000 条；对应配置为 `configs/stage1/mix_long_justrl_chat_lt2048_random2000_sft.yaml` 与 `configs/stage1/mix_long_justrl_chat_lt2048_random2000_dft.yaml`。
+- 当前 JustRL 对齐的 Mix-Long 全量 clean 数据为 `data/stage1/mix_long_justrl_chat_lt2048_all_consistent/train.jsonl`：同样按 `justrl_math + chat template + prompt + solution <= 2048` 过滤，从 5383 条中保留 5169 条长度合格样本，再剔除 50 条 `final_answer` 占位或与最后 boxed 不一致样本，最终 5119 条；对应配置为 `configs/stage1/mix_long_justrl_chat_lt2048_all_consistent_sft.yaml` 与 `configs/stage1/mix_long_justrl_chat_lt2048_all_consistent_dft.yaml`。
+- 当前 ConPress 压缩策略见 `docs/analysis/conpress_compression_policy.md`，实验细节见 `docs/analysis/conpress_probe_diagnostics.md`。主文本桶仍用 `exclude_visual + balanced_level + default prompt`，但 visual/asy 不再一刀切丢弃；Qwen3-4B visual 消融为 `format_ok=12/12`、`parse=36/36`、`boxed=36/36`、`correct=25/36`，visual 子集 `8/12` 正确。当前建议 visual/asy 单独成桶，强过滤后按 `5%-10%` 混入。
+- Qwen3-4B-2507 Thinking 5k 数据 `data/rsr/qwen3_4b_2507/short-sys_5k_gen1.json` 中可精确匹配到 `1667` 条 Hendrycks MATH train 题，且只覆盖 Level 4/5；完整 answer 平均约 `9560` tokenizer tokens，`p95` 约 `23343`，max 约 `31003`，当前不适合直接 SFT。`</think>` 后 summary 平均约 `772` tokens，可作为未来 clean-solution 候选，但该路线暂时搁置。
 - 当前主环境中 `unsloth 2025.9.9 + trl 0.26.2` 会在 import 阶段生成非法 `UnslothGRPOTrainer.py`，SFT 小实验短期已切到 `backend=trl_peft`，避免被 Unsloth 的 GRPO patch 兼容问题阻塞；后续若继续使用 Unsloth，应单独整理兼容环境。
 - 当前评测结果维护已统一到 `scripts/report_eval_results.py`：自动扫描 `outputs/eval/**/result.json` 并全量写入 registry；`docs/analysis/eval_metadata.yaml` 只作为人工展示白名单，维护重要模型、关键 baseline、效果好的 checkpoint 与明确归档的坏例。
+- 当前 MLflow 已接入 SFT、GRPO、eval、Lightning-OPD 数据准备与 MATH rollout；只记录参数、指标、小报告和路径引用，不复制 checkpoint、raw rollout、teacher logits 等大文件。
+- 一次性小样本 Stage1 YAML 已归档到 `configs/archive/stage1_oneoff_20260503/`；`configs/stage1/` 只保留稳定数据源或仍可复用的训练入口，后续不再为每个样本数/临时对照新建顶层 YAML。
 - 当前主结果口径以 `docs/analysis/eval_leaderboard.md` 为准；`math500_dev200` 这类 dev-only 结果只进入 Task Details，不进入 Main Results。
 - 当前已记录的主线结果：`outputs/grpo_3090_dapo_server/checkpoint-660` 在 MATH500 为 `0.7240`，`outputs/stage1_mix_long_sft/checkpoint-300` 在 MATH500 为 `0.7020`，`outputs/lightning_opd_nemotron_from_stage1_ckpt300_ep1` 在 MATH500 为 `0.6900`。
 - 当前 Lightning OPD gap 诊断见 `docs/analysis/lightning_opd_gap_diagnostics.md`：Nemotron 和 SFT student 的 top16 overlap 平均为 `9.84/16`，但 `teacher_logprob < student_logprob` 的 token 占 `60.67%`，说明 topK support 有重叠但 sampled-token OPD 信号整体偏负；继续放大 topK=1 OPD 风险较高。
+- 当前 verl 标准 OPD 数据准备已落地到 `scripts/prepare_verl_opd_data.py` 与 `src/post_train/verl_opd/`：smoke 数据为 `../verl/data/opd_dapo17k/smoke128/train.parquet`，共 128 条纯 DAPO；正式 1K 混合数据为 `../verl/data/opd_mix/candidate1_dapo4_1k/train.parquet`，共 1000 条，其中 `extra_info.source=opd_candidate` 为 200 条、`extra_info.source=opd_dapo` 为 800 条。`data_source` 统一写为 `math_dapo`，避免 verl 默认 reward manager 报未知 source；candidate 默认源为 `data/on_policy_loop/query_strategy/candidate_pool.jsonl`。
+- 当前 verl 标准 OPD 启动脚本为 `../verl/examples/on_policy_distillation_trainer/run_qwen25_math_opd.sh`，默认使用 GPU 可见集合内的 `1` 张学生卡与 `1` 张教师卡；若要用物理 GPU 2/3，入口是 `CUDA_VISIBLE_DEVICES=2,3 bash ...`。默认 OPD 口径是 `loss_mode=k1`、`use_policy_gradient=True`、`use_task_rewards=False`，即 student rollout + teacher logprob，不是 DAPO 算法。
+- 当前 verl 两卡 OPD 资源建议见 `docs/analysis/verl_opd_runtime_diagnostics.md`：先采用 `actor + student vLLM` 同卡、`teacher vLLM` 独占另一张卡，`STUDENT_GPU_MEMORY_UTILIZATION=0.55` 起步，`TEACHER_GPU_MEMORY_UTILIZATION=0.70` 起步，actor/student/teacher 均先用 BF16；`teacher=0.85` 已在 teacher `prompt_logprobs` 的 full-vocab `log_softmax` 阶段 OOM。
+- 当前教师 SFT rollout 已从 Lightning-OPD 中拆出，入口为 `scripts/rollout_teacher_sft.py`，核心逻辑为 `src/post_train/rollout/teacher_sft.py`。该入口只生成 raw SFT rollout，不生成 `teacher_topk`；默认输出目录为 `data/rollout/teacher_sft/...`，支持 `prompts -> shard -> merge` 与 `launch` tmux 后台分片。
+- Qwen3 Non-Thinking 教师 rollout 默认必须使用 Qwen3 chat template，并显式设置 `chat_template_enable_thinking=false`；此时空 `<think>\n\n</think>\n\n` 位于 rendered prompt 中，不应期待 generated response 再包含 `<think>`。
 
 ## 当前最重要的问题
 
@@ -58,9 +72,13 @@
    - `parse_success_rate`
    - `completions/clipped_ratio`
    - `entropy`
-5. JustRL 采样轨迹用于 SFT 前必须加强长度与完整性过滤；当前 parser 会读取第一个 `\boxed{...}`，不能单独证明生成轨迹完整。
-6. Lightning OPD 当前 topK=1 sampled-token 信号偏负，下一步若继续 OPD，应优先实现或测试 topK support loss，而不是直接增加 epoch。
-7. 旧路线文档仍在仓库中保留，必须继续和当前 `GRPO` 主线区分，不自动视为当前推荐配置。
+5. JustRL 采样轨迹用于 SFT 前必须加强长度与完整性过滤；当前正式答案抽取会读取最后一个 `\boxed{...}`，但多 boxed 与截断仍不能单独证明生成轨迹完整。
+6. 当前 MATH rollout 入口若未走 chat template，会系统性污染 `<think>`、summary 与 boxed 格式统计；后续 JustRL / Nemotron / Qwen chat 模型 probe 必须先确认 prompt 已套 chat template。
+7. Lightning OPD 当前 topK=1 sampled-token 信号偏负，下一步若继续 OPD，应优先实现或测试 topK support loss，而不是直接增加 epoch。
+8. verl OPD 当前只完成数据与启动脚本准备；截断样本整条 mask 仍是正式长跑前建议补丁。
+9. Qwen3-4B-2507 Thinking 完整思维链过长，暂不进入当前主线；如后续恢复，只考虑 summary-only 数据。
+10. 教师 SFT rollout 长任务后续默认用 `tmux` 后台分 shard 运行，并写入 `logs/` 与 `jobs.json`；避免直接在当前终端前台阻塞。
+11. 旧路线文档仍在仓库中保留，必须继续和当前 `GRPO` 主线区分，不自动视为当前推荐配置。
 
 ## 当前优先级
 
@@ -98,5 +116,6 @@
 - 当前状态看 `docs/STATE.md`
 - 评测结果总表看 `docs/analysis/eval_leaderboard.md`
 - 评测结果维护命令看 `docs/runbooks/eval.md`
+- MLflow 使用说明看 `docs/runbooks/mlflow.md`
 - `GRPO` 运行与操作说明看 `docs/runbooks/grpo.md`
 - 旧路线实验记录看 `docs/experiments/README.md` 与 `docs/experiments/two-stage-sft-simpo.md`

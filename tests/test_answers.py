@@ -21,6 +21,14 @@ class AnswerUtilsTest(unittest.TestCase):
         text = "Reasoning...\n\\boxed{42}"
         self.assertEqual(extract_final_answer(text), "42")
 
+    def test_extract_final_answer_uses_last_boxed_answer(self) -> None:
+        text = "A wrong intermediate result is \\boxed{0}.\nFinal answer: \\boxed{42}"
+        self.assertEqual(extract_final_answer(text), "42")
+
+    def test_extract_final_answer_skips_unclosed_boxed_prefix(self) -> None:
+        text = "Bad prefix \\boxed{not closed\nFinal answer: \\boxed{42}"
+        self.assertEqual(extract_final_answer(text), "42")
+
     def test_extract_plain_final_answer(self) -> None:
         text = "Reasoning...\nFinal answer: 1/2"
         self.assertEqual(extract_final_answer(text), "1/2")
@@ -40,6 +48,14 @@ class AnswerUtilsTest(unittest.TestCase):
 
     def test_equivalence_latex_spacing(self) -> None:
         self.assertTrue(are_equivalent("The answer is: \\frac{1}{2}", "0.5"))
+
+    def test_equivalence_fraction_command_variants(self) -> None:
+        self.assertTrue(are_equivalent("\\dfrac{5}{13}", "\\frac{5}{13}"))
+        self.assertTrue(are_equivalent("\\tfrac{5}{13}", "\\frac{5}{13}"))
+        self.assertTrue(are_equivalent("\\cfrac{5}{13}", "\\frac{5}{13}"))
+
+    def test_equivalence_latex_spacing_commands(self) -> None:
+        self.assertTrue(are_equivalent("\\left(1\\; +\\! 2\\right)", "(1+2)"))
 
     def test_equivalence_exact_latex_match_without_parser_support(self) -> None:
         self.assertTrue(are_equivalent("-\\frac{\\pi}{6}", "-\\frac{\\pi}{6}"))

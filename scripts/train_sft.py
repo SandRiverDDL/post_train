@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from post_train.config import load_sft_config
 from post_train.experiments import infer_route_from_config_path, register_training_run
 from post_train.sft import preview_training_samples, train_sft
+from post_train.tracking import log_training_summary, start_run
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,14 +32,23 @@ def main() -> None:
     preview = preview_training_samples(cfg.train_dataset)
     if preview:
         print(preview)
-    output_dir = train_sft(cfg)
-    summary = register_training_run(
-        route=infer_route_from_config_path(args.config),
+    route = infer_route_from_config_path(args.config)
+    with start_run(
+        run_name=cfg.output_dir.name,
+        route=route,
         config_path=args.config,
-        output_dir=output_dir,
-        train_dataset=cfg.train_dataset,
-        base_model=cfg.model_name,
-    )
+        output_dir=cfg.output_dir,
+        params=cfg,
+    ):
+        output_dir = train_sft(cfg)
+        summary = register_training_run(
+            route=route,
+            config_path=args.config,
+            output_dir=output_dir,
+            train_dataset=cfg.train_dataset,
+            base_model=cfg.model_name,
+        )
+        log_training_summary(summary)
     print(f"saved_model={output_dir}")
     print(f"wrote_run_summary={summary['summary_path']}")
 

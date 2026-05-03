@@ -4,6 +4,7 @@ from importlib import metadata
 from pathlib import Path
 
 from post_train.io import ensure_parent
+from post_train.tracking import create_trainer_callback
 
 from .callbacks import WandbSmoothingCallback
 from .diagnostics import collect_adapter_diagnostics
@@ -76,6 +77,9 @@ def train_grpo(cfg, reward_cfg) -> Path:
     wandb_callback = WandbSmoothingCallback(cfg)
     wandb_callback.init(cfg, training_args, train_dataset_size=len(train_dataset))
     callbacks = [wandb_callback.callback]
+    mlflow_callback = create_trainer_callback()
+    if mlflow_callback is not None:
+        callbacks.append(mlflow_callback)
     if question_stats_recorder is not None:
         print(f"grpo.question_stats_path={cfg.question_stats_path}")
         callbacks.append(QuestionStatsCallback(question_stats_recorder).callback)
