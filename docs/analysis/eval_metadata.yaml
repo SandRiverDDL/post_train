@@ -45,3 +45,22 @@ models:
     role: baseline
     ignore: false
     notes: 当前 SFT 基线
+  outputs/stage1_qwen3_1p7b_bf16_lora_mix_long_justrl_chat_lt2048_all_consistent_asft_topk/checkpoint-50:
+    method: ASFT-topK
+    label: Qwen3-1.7B BF16 LoRA ASFT-topK all-clean ckpt50
+    role: experiment
+    ignore: false
+    notes: 全量 Mix-Long clean<2048；dev200 选 ckpt50；MATH500/GSM8K 优于同口径 SFT/DFT，但仍有尾部
+      boxed 重复风险
+  outputs/stage1_qwen3_1p7b_bf16_lora_mix_long_justrl_chat_lt2048_all_consistent_dft/checkpoint-25:
+    method: DFT
+    label: Qwen3-1.7B BF16 LoRA DFT all-clean ckpt25
+    role: experiment
+    ignore: false
+    notes: 全量 Mix-Long clean<2048；dev200 选 ckpt25；分数略高于 SFT 且输出显著更短
+  outputs/stage1_qwen3_1p7b_bf16_lora_mix_long_justrl_chat_lt2048_all_consistent_sft/checkpoint-100:
+    method: SFT
+    label: Qwen3-1.7B BF16 LoRA SFT all-clean ckpt100
+    role: experiment
+    ignore: false
+    notes: 全量 Mix-Long clean<2048；dev200 选 ckpt100；GSM8K 存在明显 Final Answer 重复刷屏

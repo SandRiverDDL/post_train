@@ -36,12 +36,15 @@ class SFTTrainConfig(BaseModel):
     system_prompt: str | None = None
     assistant_prefill: str | None = None
     backend: Literal["unsloth", "trl_peft"] = "unsloth"
-    loss_mode: Literal["standard", "dft", "opsft", "lightning_opd"] = "standard"
+    quantization: Literal["qlora_4bit", "bf16_lora"] = "qlora_4bit"
+    loss_mode: Literal["standard", "dft", "opsft", "lightning_opd", "asft_topk"] = "standard"
     profit_enabled: bool = False
     profit_threshold: float = Field(default=0.1, gt=0.0, lt=1.0)
     distill_top_k: int = Field(default=1, ge=1)
     topk_kd_weight: float = Field(default=0.0, ge=0.0)
     opd_weight: float = Field(default=1.0, ge=0.0)
+    asft_top_k: int = Field(default=32, ge=1)
+    asft_kl_weight: float = Field(default=0.03, ge=0.0)
     save_strategy: Literal["epoch", "steps", "no"] = "epoch"
     save_steps: int | None = Field(default=None, ge=1)
     save_total_limit: int | None = Field(default=None, ge=1)
@@ -55,6 +58,8 @@ class SFTTrainConfig(BaseModel):
             raise ValueError("dft 与 profit_enabled 不能同时开启。")
         if self.loss_mode == "lightning_opd" and self.profit_enabled:
             raise ValueError("lightning_opd 与 profit_enabled 不能同时开启。")
+        if self.loss_mode == "asft_topk" and self.profit_enabled:
+            raise ValueError("asft_topk 与 profit_enabled 不能同时开启。")
         if self.loss_mode != "lightning_opd" and (
             self.distill_top_k != 1 or self.topk_kd_weight != 0.0 or self.opd_weight != 1.0
         ):

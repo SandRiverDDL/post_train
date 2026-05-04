@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import os
 from pathlib import Path
 from typing import Any
@@ -279,6 +280,125 @@ def _compute_sft_loss(
     }
 
 
+def _topk_truncated_kl_loss(
+    current_logits: torch.Tensor,
+    base_topk_token_ids: torch.Tensor,
+    base_topk_logits: torch.Tensor,
+    valid_mask: torch.Tensor,
+) -> torch.Tensor:
+    base_topk_log_probs = base_topk_logits - base_topk_logits.logsumexp(dim=-1, keepdim=True)
+    base_topk_probs = base_topk_log_probs.exp()
+    current_topk_logits = current_logits.gather(dim=-1, index=base_topk_token_ids)
+    current_topk_log_probs = current_topk_logits - current_topk_logits.logsumexp(dim=-1, keepdim=True)
+    token_kl = (base_topk_probs * (base_topk_log_probs - current_topk_log_probs)).sum(dim=-1)
+    return (token_kl * valid_mask.to(token_kl.dtype)).sum() / valid_mask.sum().to(token_kl.dtype)
+
+
+def _compute_asft_topk_loss_from_logits(
+    current_logits: torch.Tensor,
+    base_topk_token_ids: torch.Tensor,
+    base_topk_logits: torch.Tensor,
+    labels: torch.Tensor,
+    *,
+    asft_kl_weight: float,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    shift_logits = current_logits[..., :-1, :]
+    shift_labels = labels[..., 1:]
+    valid_mask = shift_labels.ne(-100)
+    valid_count = int(valid_mask.sum().item())
+    if valid_count == 0:
+        zero = current_logits.sum() * 0.0
+        return zero, {
+            "valid_tokens": 0.0,
+            "kept_tokens": 0.0,
+            "filtered_tokens": 0.0,
+            "empty_batches": 1.0,
+            "avg_gold_prob": 0.0,
+            "dft_loss_scale": 0.0,
+            "opsft_batch_max_completion_tokens": 0.0,
+            "opsft_avg_completion_tokens": 0.0,
+            "opsft_effective_sample_count": 0.0,
+            "opsft_zero_completion_batches": 0.0,
+            "asft_dft_loss": 0.0,
+            "asft_topk_kl_loss": 0.0,
+        }
+
+    safe_labels = shift_labels.masked_fill(~valid_mask, 0)
+    gold_logits = shift_logits.gather(dim=-1, index=safe_labels.unsqueeze(-1)).squeeze(-1)
+    token_nll = shift_logits.logsumexp(dim=-1) - gold_logits
+    gold_prob = torch.exp(-token_nll.detach())
+    dft_token_loss = gold_prob * token_nll
+    dft_loss = (dft_token_loss * valid_mask.to(dft_token_loss.dtype)).sum() / valid_mask.sum().to(dft_token_loss.dtype)
+    topk_kl_loss = _topk_truncated_kl_loss(
+        shift_logits,
+        base_topk_token_ids,
+        base_topk_logits,
+        valid_mask,
+    )
+    loss = dft_loss + asft_kl_weight * topk_kl_loss
+    avg_gold_prob = float(gold_prob[valid_mask].mean().item())
+    return loss, {
+        "valid_tokens": float(valid_count),
+        "kept_tokens": float(valid_count),
+        "filtered_tokens": 0.0,
+        "empty_batches": 0.0,
+        "avg_gold_prob": avg_gold_prob,
+        "dft_loss_scale": avg_gold_prob,
+        "opsft_batch_max_completion_tokens": 0.0,
+        "opsft_avg_completion_tokens": 0.0,
+        "opsft_effective_sample_count": 0.0,
+        "opsft_zero_completion_batches": 0.0,
+        "asft_dft_loss": float(dft_loss.detach().item()),
+        "asft_topk_kl_loss": float(topk_kl_loss.detach().item()),
+    }
+
+
+@contextmanager
+def _disabled_adapter(model):
+    if hasattr(model, "disable_adapter"):
+        with model.disable_adapter():
+            yield
+        return
+    module = getattr(model, "module", None)
+    if module is not None and hasattr(module, "disable_adapter"):
+        with module.disable_adapter():
+            yield
+        return
+    raise ValueError("asft_topk 需要 PEFT LoRA 模型支持 disable_adapter()。")
+
+
+def _compute_asft_topk_loss(
+    model,
+    model_inputs: dict[str, torch.Tensor],
+    labels: torch.Tensor,
+    *,
+    asft_top_k: int,
+    asft_kl_weight: float,
+):
+    with torch.no_grad(), _disabled_adapter(model):
+        base_outputs = model(**model_inputs)
+        base_logits = base_outputs.logits if hasattr(base_outputs, "logits") else base_outputs[0]
+        base_shift_logits = base_logits[..., :-1, :]
+        top_k = min(asft_top_k, base_shift_logits.shape[-1])
+        base_topk_logits, base_topk_token_ids = torch.topk(base_shift_logits, k=top_k, dim=-1)
+        base_topk_logits = base_topk_logits.detach()
+        base_topk_token_ids = base_topk_token_ids.detach()
+        del base_shift_logits, base_logits, base_outputs
+
+    outputs = model(**model_inputs)
+    current_logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
+    loss, metrics = _compute_asft_topk_loss_from_logits(
+        current_logits,
+        base_topk_token_ids,
+        base_topk_logits,
+        labels,
+        asft_kl_weight=asft_kl_weight,
+    )
+    metrics["asft_top_k"] = float(top_k)
+    metrics["asft_kl_weight"] = float(asft_kl_weight)
+    return loss, metrics, outputs
+
+
 def _compute_lightning_opd_loss(
     logits: torch.Tensor,
     input_ids: torch.Tensor,
@@ -381,6 +501,8 @@ class ProfitStatsMixin:
         distill_top_k: int,
         topk_kd_weight: float,
         opd_weight: float,
+        asft_top_k: int,
+        asft_kl_weight: float,
     ) -> None:
         self.loss_mode = loss_mode
         self.profit_enabled = profit_enabled
@@ -388,6 +510,8 @@ class ProfitStatsMixin:
         self.distill_top_k = distill_top_k
         self.topk_kd_weight = topk_kd_weight
         self.opd_weight = opd_weight
+        self.asft_top_k = asft_top_k
+        self.asft_kl_weight = asft_kl_weight
         self._reset_profit_stats()
 
     def _reset_profit_stats(self) -> None:
@@ -406,14 +530,33 @@ class ProfitStatsMixin:
             "lightning_opd_topk_kd_loss_sum": 0.0,
             "lightning_opd_teacher_logprob_sum": 0.0,
             "lightning_opd_student_logprob_sum": 0.0,
+            "asft_dft_loss_sum": 0.0,
+            "asft_topk_kl_loss_sum": 0.0,
             "step_count": 0.0,
         }
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         labels = inputs["labels"]
         model_inputs = _extract_model_inputs(inputs)
-        outputs = model(**model_inputs)
-        logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
+        if self.loss_mode == "asft_topk":
+            loss, metrics, outputs = _compute_asft_topk_loss(
+                model,
+                model_inputs,
+                labels,
+                asft_top_k=self.asft_top_k,
+                asft_kl_weight=self.asft_kl_weight,
+            )
+            self._profit_stats["valid_tokens"] += metrics["valid_tokens"]
+            self._profit_stats["kept_tokens"] += metrics["kept_tokens"]
+            self._profit_stats["filtered_tokens"] += metrics["filtered_tokens"]
+            self._profit_stats["empty_batches"] += metrics["empty_batches"]
+            self._profit_stats["avg_gold_prob_weighted_sum"] += metrics["avg_gold_prob"] * metrics["kept_tokens"]
+            self._profit_stats["asft_dft_loss_sum"] += metrics["asft_dft_loss"]
+            self._profit_stats["asft_topk_kl_loss_sum"] += metrics["asft_topk_kl_loss"]
+        else:
+            outputs = model(**model_inputs)
+            logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
+
         if self.loss_mode == "lightning_opd":
             loss, metrics = _compute_lightning_opd_loss(
                 logits,
@@ -432,7 +575,7 @@ class ProfitStatsMixin:
             self._profit_stats["lightning_opd_topk_kd_loss_sum"] += metrics["topk_kd_loss"]
             self._profit_stats["lightning_opd_teacher_logprob_sum"] += metrics["avg_teacher_logprob"]
             self._profit_stats["lightning_opd_student_logprob_sum"] += metrics["avg_student_logprob"]
-        else:
+        elif self.loss_mode != "asft_topk":
             loss, metrics = _compute_sft_loss(
                 logits,
                 labels,
@@ -473,6 +616,18 @@ class ProfitStatsMixin:
             logs["dft_avg_gold_prob"] = (
                 self._profit_stats["avg_gold_prob_weighted_sum"] / kept_tokens if kept_tokens > 0 else 0.0
             )
+        elif self.loss_mode == "asft_topk" and self._profit_stats["valid_tokens"] > 0:
+            logs = dict(logs)
+            step_count = self._profit_stats["step_count"]
+            kept_tokens = self._profit_stats["kept_tokens"]
+            logs["asft_valid_tokens"] = self._profit_stats["valid_tokens"]
+            logs["asft_avg_gold_prob"] = (
+                self._profit_stats["avg_gold_prob_weighted_sum"] / kept_tokens if kept_tokens > 0 else 0.0
+            )
+            logs["asft_dft_loss"] = self._profit_stats["asft_dft_loss_sum"] / step_count
+            logs["asft_topk_kl_loss"] = self._profit_stats["asft_topk_kl_loss_sum"] / step_count
+            logs["asft_top_k"] = float(self.asft_top_k)
+            logs["asft_kl_weight"] = float(self.asft_kl_weight)
         elif self.loss_mode == "opsft" and self._profit_stats["step_count"] > 0:
             logs = dict(logs)
             step_count = self._profit_stats["step_count"]
@@ -536,6 +691,9 @@ def _train_sft_unsloth(cfg) -> Path:
     from trl import SFTTrainer
     from unsloth import FastLanguageModel
 
+    if cfg.loss_mode == "asft_topk":
+        raise ValueError("asft_topk 当前只支持 backend=trl_peft。")
+
     class ProfitSFTTrainer(ProfitStatsMixin, SFTTrainer):
         def __init__(
             self,
@@ -546,6 +704,8 @@ def _train_sft_unsloth(cfg) -> Path:
             distill_top_k: int,
             topk_kd_weight: float,
             opd_weight: float,
+            asft_top_k: int,
+            asft_kl_weight: float,
             **kwargs,
         ) -> None:
             super().__init__(*args, **kwargs)
@@ -556,6 +716,8 @@ def _train_sft_unsloth(cfg) -> Path:
                 distill_top_k=distill_top_k,
                 topk_kd_weight=topk_kd_weight,
                 opd_weight=opd_weight,
+                asft_top_k=asft_top_k,
+                asft_kl_weight=asft_kl_weight,
             )
 
     model, tokenizer = FastLanguageModel.from_pretrained(
@@ -609,6 +771,8 @@ def _train_sft_unsloth(cfg) -> Path:
         distill_top_k=cfg.distill_top_k,
         topk_kd_weight=cfg.topk_kd_weight,
         opd_weight=cfg.opd_weight,
+        asft_top_k=cfg.asft_top_k,
+        asft_kl_weight=cfg.asft_kl_weight,
     )
     mlflow_callback = create_trainer_callback()
     if mlflow_callback is not None:
@@ -636,6 +800,8 @@ def _train_sft_trl_peft(cfg) -> Path:
             distill_top_k: int,
             topk_kd_weight: float,
             opd_weight: float,
+            asft_top_k: int,
+            asft_kl_weight: float,
             **kwargs,
         ) -> None:
             super().__init__(*args, **kwargs)
@@ -646,6 +812,8 @@ def _train_sft_trl_peft(cfg) -> Path:
                 distill_top_k=distill_top_k,
                 topk_kd_weight=topk_kd_weight,
                 opd_weight=opd_weight,
+                asft_top_k=asft_top_k,
+                asft_kl_weight=asft_kl_weight,
             )
 
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
@@ -663,19 +831,22 @@ def _train_sft_trl_peft(cfg) -> Path:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    quantization_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-        bnb_4bit_use_double_quant=True,
-    )
-    model = AutoModelForCausalLM.from_pretrained(
-        base_model_name,
-        trust_remote_code=True,
-        quantization_config=quantization_config,
-        device_map={"": local_rank} if torch.cuda.is_available() else None,
-    )
-    model = prepare_model_for_kbit_training(model)
+    model_kwargs: dict[str, Any] = {
+        "trust_remote_code": True,
+        "device_map": {"": local_rank} if torch.cuda.is_available() else None,
+    }
+    if cfg.quantization == "qlora_4bit":
+        model_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+            bnb_4bit_use_double_quant=True,
+        )
+    else:
+        model_kwargs["torch_dtype"] = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+    model = AutoModelForCausalLM.from_pretrained(base_model_name, **model_kwargs)
+    if cfg.quantization == "qlora_4bit":
+        model = prepare_model_for_kbit_training(model)
     if is_adapter_checkpoint:
         model = PeftModel.from_pretrained(model, cfg.model_name, is_trainable=True)
     else:
@@ -720,6 +891,8 @@ def _train_sft_trl_peft(cfg) -> Path:
         distill_top_k=cfg.distill_top_k,
         topk_kd_weight=cfg.topk_kd_weight,
         opd_weight=cfg.opd_weight,
+        asft_top_k=cfg.asft_top_k,
+        asft_kl_weight=cfg.asft_kl_weight,
     )
     mlflow_callback = create_trainer_callback()
     if mlflow_callback is not None:

@@ -129,6 +129,7 @@
 - 这条线当前主要提供：
   - seed adapter
   - 对照评测分数
+- `backend=trl_peft` 可通过 `runs/sft/train_sft_ddp.sh` 使用 `torchrun` 做多卡 DP/DDP；`scripts/train_sft.py` 仍只负责单次训练入口与主进程结果登记。
 
 ### 2. GRPO / DAPO-lite（当前主线）
 
