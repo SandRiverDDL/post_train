@@ -20,9 +20,13 @@ def _tokenize_prompt_completion(
     prompt: str,
     completion: str,
     max_length: int,
+    append_eos: bool = True,
 ) -> dict[str, list[int]]:
     prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
     completion_ids = tokenizer(completion, add_special_tokens=False)["input_ids"]
+    eos_token_id = getattr(tokenizer, "eos_token_id", None)
+    if append_eos and eos_token_id is not None and (not completion_ids or completion_ids[-1] != eos_token_id):
+        completion_ids = [*completion_ids, int(eos_token_id)]
     input_ids = (prompt_ids + completion_ids)[:max_length]
     attention_mask = [1] * len(input_ids)
     labels = input_ids.copy()

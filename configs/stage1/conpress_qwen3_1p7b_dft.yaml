@@ -1,0 +1,27 @@
+model_name: /mnt/dataset/fengshuwen/hf_cache/hub/models--Qwen--Qwen3-1.7B/snapshots/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e
+train_dataset: data/stage1/conpress_qwen3_4b_nt_correct_compressed/train.jsonl
+output_dir: outputs/stage1_conpress_qwen3_1p7b_dft
+seed: 42
+max_seq_length: 4096
+learning_rate: 1.0e-4
+
+epochs: 1
+batch_size: 2
+gradient_accumulation_steps: 5
+lora_rank: 32
+lora_alpha: 64
+lora_dropout: 0.0
+warmup_ratio: 0.03
+weight_decay: 0.01
+logging_steps: 5
+group_by_length: true
+prompt_style: justrl_math
+use_chat_template: true
+system_prompt: ""
+assistant_prefill: "<think>\n\n</think>\n\n"
+backend: trl_peft
+loss_mode: dft
+
+save_strategy: steps
+save_steps: 25
+save_total_limit: 20

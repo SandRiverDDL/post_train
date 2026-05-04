@@ -35,6 +35,10 @@ class EvalConfig(BaseModel):
     gpu_memory_utilization: float = Field(default=0.7, gt=0.0, le=1.0)
     max_lora_rank: int | None = Field(default=None, ge=1)
     seed: int = 42
+    prompt_style: Literal["default", "justrl_math"] = "justrl_math"
+    use_chat_template: bool = False
+    system_prompt: str | None = None
+    assistant_prefill: str | None = None
 
     @model_validator(mode="after")
     def _normalize_tasks(self) -> "EvalConfig":

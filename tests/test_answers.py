@@ -54,6 +54,9 @@ class AnswerUtilsTest(unittest.TestCase):
         self.assertTrue(are_equivalent("\\tfrac{5}{13}", "\\frac{5}{13}"))
         self.assertTrue(are_equivalent("\\cfrac{5}{13}", "\\frac{5}{13}"))
 
+    def test_equivalence_latex_implicit_single_token_args(self) -> None:
+        self.assertTrue(are_equivalent("\\dfrac{\\sqrt{6}}{2}", "\\frac{\\sqrt6}2"))
+
     def test_equivalence_latex_spacing_commands(self) -> None:
         self.assertTrue(are_equivalent("\\left(1\\; +\\! 2\\right)", "(1+2)"))
 

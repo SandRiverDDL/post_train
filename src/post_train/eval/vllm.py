@@ -8,7 +8,7 @@ from typing import Any
 from post_train.eval.model import describe_model_resolution, resolve_model_args
 from post_train.eval.tasks import build_task_name
 from post_train.io import read_jsonl
-from post_train.prompts import build_eval_prompt
+from post_train.prompts import build_math_prompt, render_chat_prompt
 
 
 @dataclass(frozen=True)
@@ -40,6 +40,7 @@ class VLLMRunner:
         self.spec, _ = build_vllm_runner_spec(model_args)
         self._llm = LLM(model=self.spec.model_name, **self.spec.llm_kwargs)
         self._request_counter = 0
+        self._tokenizer: object | None = None
 
     def matches(self, model_args: dict[str, Any]) -> bool:
         candidate_spec, _ = build_vllm_runner_spec(model_args)
@@ -57,6 +58,10 @@ class VLLMRunner:
         samples_per_problem: int = 1,
         sampling_temperature: float | None = None,
         sampling_top_p: float | None = None,
+        prompt_style: str = "justrl_math",
+        use_chat_template: bool = False,
+        system_prompt: str | None = None,
+        assistant_prefill: str | None = None,
     ) -> dict[str, Any]:
         from vllm import SamplingParams
         from vllm.lora.request import LoRARequest
@@ -69,7 +74,16 @@ class VLLMRunner:
         rows = read_jsonl(dataset_path)
         if limit is not None:
             rows = rows[:limit]
-        prompts = [build_eval_prompt(str(row["question"])) for row in rows]
+        prompts = [
+            self._build_prompt(
+                str(row["question"]),
+                prompt_style=prompt_style,
+                use_chat_template=use_chat_template,
+                system_prompt=system_prompt,
+                assistant_prefill=assistant_prefill,
+            )
+            for row in rows
+        ]
         _, lora_path = build_vllm_runner_spec(model_args)
 
         if samples_per_problem > 1:
@@ -118,6 +132,12 @@ class VLLMRunner:
 
         return {
             "runner": "vllm_raw",
+            "prompt_config": {
+                "prompt_style": prompt_style,
+                "use_chat_template": use_chat_template,
+                "system_prompt": system_prompt,
+                "assistant_prefill": assistant_prefill,
+            },
             "task_name": task_name,
             "samples_per_problem": samples_per_problem,
             "samples": {task_name: samples},
@@ -132,6 +152,37 @@ class VLLMRunner:
         if callable(shutdown):
             shutdown()
 
+    def _get_tokenizer(self) -> object:
+        if self._tokenizer is not None:
+            return self._tokenizer
+        get_tokenizer = getattr(self._llm, "get_tokenizer", None)
+        if callable(get_tokenizer):
+            self._tokenizer = get_tokenizer()
+            return self._tokenizer
+        from transformers import AutoTokenizer
+
+        self._tokenizer = AutoTokenizer.from_pretrained(self.spec.model_name, trust_remote_code=True)
+        return self._tokenizer
+
+    def _build_prompt(
+        self,
+        question: str,
+        *,
+        prompt_style: str,
+        use_chat_template: bool,
+        system_prompt: str | None,
+        assistant_prefill: str | None,
+    ) -> str:
+        prompt = build_math_prompt(question, style=prompt_style)  # type: ignore[arg-type]
+        if not use_chat_template:
+            return prompt + (assistant_prefill or "")
+        return render_chat_prompt(
+            self._get_tokenizer(),
+            prompt,
+            system_prompt=system_prompt,
+            assistant_prefill=assistant_prefill,
+        )
+
 
 def run_vllm_raw_eval(
     *,
@@ -144,6 +195,10 @@ def run_vllm_raw_eval(
     samples_per_problem: int = 1,
     sampling_temperature: float | None = None,
     sampling_top_p: float | None = None,
+    prompt_style: str = "justrl_math",
+    use_chat_template: bool = False,
+    system_prompt: str | None = None,
+    assistant_prefill: str | None = None,
 ) -> dict[str, Any]:
     runner = VLLMRunner(model_args)
     try:
@@ -157,6 +212,10 @@ def run_vllm_raw_eval(
             samples_per_problem=samples_per_problem,
             sampling_temperature=sampling_temperature,
             sampling_top_p=sampling_top_p,
+            prompt_style=prompt_style,
+            use_chat_template=use_chat_template,
+            system_prompt=system_prompt,
+            assistant_prefill=assistant_prefill,
         )
     finally:
         runner.close()

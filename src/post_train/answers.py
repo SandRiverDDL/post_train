@@ -23,6 +23,47 @@ LATEX_NORMALIZATION_REPLACEMENTS = {
 }
 
 
+def _normalize_implicit_latex_args(text: str) -> str:
+    normalized = re.sub(r"\\sqrt(?!\{)([A-Za-z0-9])", r"\\sqrt{\1}", text)
+    marker = r"\frac{"
+    index = 0
+    pieces: list[str] = []
+
+    while True:
+        start = normalized.find(marker, index)
+        if start == -1:
+            pieces.append(normalized[index:])
+            return "".join(pieces)
+
+        pieces.append(normalized[index:start])
+        first_arg_start = start + len(marker)
+        cursor = first_arg_start
+        depth = 1
+        while cursor < len(normalized):
+            char = normalized[cursor]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            cursor += 1
+
+        if cursor >= len(normalized):
+            pieces.append(normalized[start:])
+            return "".join(pieces)
+
+        pieces.append(normalized[start : cursor + 1])
+        second_arg_start = cursor + 1
+        if second_arg_start < len(normalized) and normalized[second_arg_start] != "{":
+            pieces.append("{")
+            pieces.append(normalized[second_arg_start])
+            pieces.append("}")
+            index = second_arg_start + 1
+        else:
+            index = second_arg_start
+
+
 def extract_boxed_content(text: str) -> Optional[str]:
     contents = extract_boxed_contents(text)
     return contents[0] if contents else None
@@ -135,6 +176,7 @@ def normalize_answer(answer: str | None) -> str:
     normalized = answer.strip()
     for old, new in LATEX_NORMALIZATION_REPLACEMENTS.items():
         normalized = normalized.replace(old, new)
+    normalized = _normalize_implicit_latex_args(normalized)
     normalized = normalized.replace("$", "")
     normalized = normalized.replace(" ", "")
     normalized = normalized.rstrip(".")

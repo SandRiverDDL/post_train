@@ -78,6 +78,10 @@ class EvalRunner:
             "samples_per_problem": task.samples_per_problem,
             "sampling_temperature": task.sampling_temperature,
             "sampling_top_p": task.sampling_top_p,
+            "prompt_style": self.eval_cfg.prompt_style,
+            "use_chat_template": self.eval_cfg.use_chat_template,
+            "system_prompt": self.eval_cfg.system_prompt,
+            "assistant_prefill": self.eval_cfg.assistant_prefill,
         }
         if self.backend_runner is None:
             raw_result = run_vllm_raw_eval(**raw_eval_kwargs)

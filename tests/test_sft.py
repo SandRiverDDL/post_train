@@ -38,6 +38,10 @@ class WhitespaceTokenizer:
         return {"input_ids": list(range(1, len(pieces) + 1))}
 
 
+class WhitespaceTokenizerWithEos(WhitespaceTokenizer):
+    eos_token_id = 99
+
+
 class RecordingChatTokenizer:
     chat_template = "dummy"
 
@@ -73,6 +77,19 @@ class SFTTokenizationTest(unittest.TestCase):
         self.assertEqual(encoded["attention_mask"], [1, 1, 1, 1])
         self.assertEqual(encoded["labels"], [-100, -100, 2, 3])
         self.assertEqual(encoded["length"], 4)
+
+    def test_tokenize_prompt_completion_appends_eos_to_completion_labels(self) -> None:
+        tokenizer = WhitespaceTokenizerWithEos()
+
+        encoded = _tokenize_prompt_completion(
+            tokenizer,
+            prompt="Prompt text",
+            completion="Final answer",
+            max_length=16,
+        )
+
+        self.assertEqual(encoded["input_ids"], [1, 2, 1, 2, 99])
+        self.assertEqual(encoded["labels"], [-100, -100, 1, 2, 99])
 
     def test_build_train_dataset_adds_length_column(self) -> None:
         tokenizer = WhitespaceTokenizer()

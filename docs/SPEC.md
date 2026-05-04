@@ -98,6 +98,10 @@
 ## Prompt 与格式原则
 
 - 统一要求答案中必须包含 `\boxed{...}`
+- SFT/DFT 训练样本在 tokenization 阶段必须把 tokenizer 的 `eos_token_id` 追加到 completion 末尾并参与 label 监督；原始 JSONL 不写特殊 token。
+- 使用 chat template 训练的模型，评测也必须使用同一类 chat template prompt；裸 prompt 评测只适用于裸 prompt 训练或明确作为 probe。
+- Qwen3 no-think 模型或希望禁用 thinking 的 Qwen3 实验，训练与评测必须统一使用 `assistant_prefill="<think>\n\n</think>\n\n"`，或等价使用 tokenizer 的 `enable_thinking=false` 渲染；不能训练时一种 prompt、评测时另一种 prompt。
+- `assistant_prefill` 属于 prompt 口径，不写入原始 completion；completion 仍只保存模型应学习生成的解答正文，并在 tokenization 阶段追加 EOS。
 - 当前阶段若 `boxed_rate / parse_success_rate` 显著下降，优先视为格式退化，而不是直接下结论说推理能力退化
 - 若评测长度设置导致截断比例过高，必须先修正长度口径，再比较模型优劣
 

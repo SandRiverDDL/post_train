@@ -5,6 +5,7 @@ import random
 import re
 import statistics
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -262,6 +263,13 @@ def build_prompt(rows: list[dict[str, Any]], *, prompt_style: str) -> str:
     raise ValueError(f"未知 prompt_style：{prompt_style}")
 
 
+@lru_cache(maxsize=8)
+def _load_chat_template_tokenizer(tokenizer_name: str):
+    from transformers import AutoTokenizer
+
+    return AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
+
+
 def apply_chat_template(
     prompt: str,
     *,
@@ -269,9 +277,7 @@ def apply_chat_template(
     assistant_prefill: str | None = None,
     enable_thinking: bool | None = None,
 ) -> str:
-    from transformers import AutoTokenizer
-
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
+    tokenizer = _load_chat_template_tokenizer(tokenizer_name)
     if not tokenizer.chat_template:
         return prompt + (assistant_prefill or "")
     template_kwargs: dict[str, Any] = {}

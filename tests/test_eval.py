@@ -508,6 +508,20 @@ class EvalPipelineTest(unittest.TestCase):
                         SimpleNamespace(outputs=[SimpleNamespace(text="\\boxed{4}")]),
                     ]
 
+                def get_tokenizer(self):
+                    class FakeTokenizer:
+                        chat_template = "dummy"
+
+                        def apply_chat_template(self, messages, *, tokenize: bool, add_generation_prompt: bool) -> str:
+                            rendered = ""
+                            for message in messages:
+                                rendered += f"<|im_start|>{message['role']}\n{message['content']}<|im_end|>\n"
+                            if add_generation_prompt:
+                                rendered += "<|im_start|>assistant\n"
+                            return rendered
+
+                    return FakeTokenizer()
+
             class FakeSamplingParams:
                 def __init__(self, **kwargs) -> None:
                     self.kwargs = kwargs
@@ -551,6 +565,70 @@ class EvalPipelineTest(unittest.TestCase):
         self.assertEqual(result["runner"], "vllm_raw")
         self.assertEqual(len(result["samples"]["toy"]), 2)
         self.assertTrue(calls[-1]["shutdown"])
+
+    def test_run_vllm_raw_eval_can_apply_chat_template(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dataset_path = Path(tmp_dir) / "toy.jsonl"
+            dataset_path.write_text(
+                json.dumps({"id": "1", "question": "1+1=?", "final_answer": "2"}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            calls: list[dict[str, object]] = []
+
+            class FakeEngine:
+                def shutdown(self) -> None:
+                    calls.append({"shutdown": True})
+
+            class FakeTokenizer:
+                chat_template = "dummy"
+
+                def apply_chat_template(self, messages, *, tokenize: bool, add_generation_prompt: bool) -> str:
+                    rendered = ""
+                    for message in messages:
+                        rendered += f"<|im_start|>{message['role']}\n{message['content']}<|im_end|>\n"
+                    if add_generation_prompt:
+                        rendered += "<|im_start|>assistant\n"
+                    return rendered
+
+            class FakeLLM:
+                def __init__(self, model=None, **kwargs) -> None:
+                    self.llm_engine = FakeEngine()
+
+                def get_tokenizer(self):
+                    return FakeTokenizer()
+
+                def generate(self, prompts, sampling_params=None, use_tqdm=False, lora_request=None):
+                    calls.append({"prompts": prompts})
+                    return [SimpleNamespace(outputs=[SimpleNamespace(text="\\boxed{2}")])]
+
+            class FakeSamplingParams:
+                def __init__(self, **kwargs) -> None:
+                    pass
+
+            fake_vllm = ModuleType("vllm")
+            fake_vllm.LLM = FakeLLM
+            fake_vllm.SamplingParams = FakeSamplingParams
+            fake_lora_request_module = ModuleType("vllm.lora.request")
+            fake_lora_request_module.LoRARequest = lambda *args, **kwargs: SimpleNamespace()
+
+            with patch.dict(sys.modules, {"vllm": fake_vllm, "vllm.lora.request": fake_lora_request_module}):
+                result = run_vllm_raw_eval(
+                    model_args={"pretrained": "Qwen/Qwen3-1.7B", "max_length": 1536},
+                    dataset_path=dataset_path,
+                    task_name="toy",
+                    batch_size=1,
+                    limit=None,
+                    max_gen_toks=128,
+                    use_chat_template=True,
+                    system_prompt="",
+                )
+
+        prompt = calls[0]["prompts"][0]
+        self.assertIn("<|im_start|>system\n<|im_end|>", prompt)
+        self.assertIn("<|im_start|>user\n1+1=?", prompt)
+        self.assertTrue(prompt.endswith("<|im_start|>assistant\n"))
+        self.assertTrue(result["prompt_config"]["use_chat_template"])
 
     def test_vllm_runner_reuses_llm_and_switches_lora_request(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
