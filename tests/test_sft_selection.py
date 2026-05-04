@@ -82,6 +82,41 @@ class SFTSelectionTest(unittest.TestCase):
         self.assertEqual(cfg.loss_mode, "dft")
         self.assertFalse(cfg.profit_enabled)
 
+    def test_load_sft_config_supports_lora_quantization_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "bf16_lora.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "model_name: /tmp/model",
+                        "train_dataset: data/stage1/train.jsonl",
+                        "output_dir: outputs/stage1_sft",
+                        "quantization: bf16_lora",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            cfg = load_sft_config(config_path)
+
+        self.assertEqual(cfg.quantization, "bf16_lora")
+
+    def test_load_sft_config_defaults_to_qlora(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "default.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "model_name: /tmp/model",
+                        "train_dataset: data/stage1/train.jsonl",
+                        "output_dir: outputs/stage1_sft",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            cfg = load_sft_config(config_path)
+
+        self.assertEqual(cfg.quantization, "qlora_4bit")
+
     def test_load_sft_config_rejects_dft_with_profit_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "dft_profit.yaml"
@@ -98,6 +133,46 @@ class SFTSelectionTest(unittest.TestCase):
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(ValueError, "dft 与 profit_enabled 不能同时开启"):
+                load_sft_config(config_path)
+
+    def test_load_sft_config_supports_asft_topk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "asft.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "model_name: /tmp/model",
+                        "train_dataset: data/stage1/train.jsonl",
+                        "output_dir: outputs/stage1_asft",
+                        "loss_mode: asft_topk",
+                        "asft_top_k: 32",
+                        "asft_kl_weight: 0.03",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            cfg = load_sft_config(config_path)
+
+        self.assertEqual(cfg.loss_mode, "asft_topk")
+        self.assertEqual(cfg.asft_top_k, 32)
+        self.assertEqual(cfg.asft_kl_weight, 0.03)
+
+    def test_load_sft_config_rejects_asft_topk_with_profit_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "asft_profit.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "model_name: /tmp/model",
+                        "train_dataset: data/stage1/train.jsonl",
+                        "output_dir: outputs/stage1_asft",
+                        "loss_mode: asft_topk",
+                        "profit_enabled: true",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "asft_topk 与 profit_enabled 不能同时开启"):
                 load_sft_config(config_path)
 
     def test_scan_checkpoint_dirs_sorts_by_global_step(self) -> None:

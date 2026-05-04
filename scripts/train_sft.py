@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -12,6 +13,10 @@ from post_train.config import load_sft_config
 from post_train.experiments import infer_route_from_config_path, register_training_run
 from post_train.sft import preview_training_samples, train_sft
 from post_train.tracking import log_training_summary, start_run
+
+
+def is_main_process() -> bool:
+    return int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0"))) == 0
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,8 +34,9 @@ def main() -> None:
 
         overrides = OmegaConf.to_container(OmegaConf.from_dotlist(args.set), resolve=True)
         cfg = type(cfg).model_validate({**cfg.model_dump(), **overrides})
-    preview = preview_training_samples(cfg.train_dataset)
-    if preview:
+    main_process = is_main_process()
+    preview = preview_training_samples(cfg.train_dataset) if main_process else ""
+    if main_process and preview:
         print(preview)
     route = infer_route_from_config_path(args.config)
     with start_run(
@@ -41,6 +47,8 @@ def main() -> None:
         params=cfg,
     ):
         output_dir = train_sft(cfg)
+        if not main_process:
+            return
         summary = register_training_run(
             route=route,
             config_path=args.config,

@@ -46,7 +46,11 @@
 - 已重跑 JustRL-Nemotron chat-template 50 条 probe：`data/rollout/math_sft/justrl_nemotron_chat_probe50_len8192/raw/raw_samples.merged.jsonl`。`<think>` 从裸 prompt 的 `8/50` 提升到 `50/50`，`</think>` 为 `42/50`；输出平均 `2805.5` tokens，`p95=5071.5`，max `6099`，未命中 `8192` 上限。结论是 chat template 修复了起始格式，但输出仍偏长，不能直接 raw SFT。
 - JustRL rollout 详细诊断见 `docs/analysis/justrl_rollout_diagnostics.md`：主要问题是长推理偏置、`double_boxed` 普遍、简单题过度推理、长组合/几何题容易截断；其中 `<think>` 格式不稳定的结论必须区分是否使用了 chat template，不建议 raw rollout 直接作为 SFT 数据。
 - 当前 JustRL 对齐的 Mix-Long SFT/DFT 小样本数据为 `data/stage1/mix_long_justrl_chat_lt2048_random2000/train.jsonl`：Mix-Long 归一化保留原有 boxed，只有缺 boxed 时追加裸 `\boxed{...}`；随后按 `justrl_math` prompt、`use_chat_template=true`、`system_prompt=""` 计算 `prompt + solution <= 2048` 后 seed=42 随机抽 2000 条；对应配置为 `configs/stage1/mix_long_justrl_chat_lt2048_random2000_sft.yaml` 与 `configs/stage1/mix_long_justrl_chat_lt2048_random2000_dft.yaml`。
-- 当前 JustRL 对齐的 Mix-Long 全量 clean 数据为 `data/stage1/mix_long_justrl_chat_lt2048_all_consistent/train.jsonl`：同样按 `justrl_math + chat template + prompt + solution <= 2048` 过滤，从 5383 条中保留 5169 条长度合格样本，再剔除 50 条 `final_answer` 占位或与最后 boxed 不一致样本，最终 5119 条；对应配置为 `configs/stage1/mix_long_justrl_chat_lt2048_all_consistent_sft.yaml` 与 `configs/stage1/mix_long_justrl_chat_lt2048_all_consistent_dft.yaml`。
+- 当前 JustRL 对齐的 Mix-Long 全量 clean 数据为 `data/stage1/mix_long_justrl_chat_lt2048_all_consistent/train.jsonl`：同样按 `justrl_math + chat template + prompt + solution <= 2048` 过滤，从 5383 条中保留 5169 条长度合格样本，再剔除 50 条 `final_answer` 占位或与最后 boxed 不一致样本，最终 5119 条；对应配置为 `configs/stage1/mix_long_justrl_chat_lt2048_all_consistent_sft.yaml`、`configs/stage1/mix_long_justrl_chat_lt2048_all_consistent_dft.yaml`，Qwen3-1.7B 主线配置另有 `qwen3_1p7b_*_sft/dft/asft_topk.yaml`。
+- 当前 SFT 的 `backend=trl_peft` 支持 `torchrun` 多卡 DP/DDP，入口为 `runs/sft/train_sft_ddp.sh`。三卡示例：`GPUS=0,1,2 CONFIG=configs/stage1/mix_long_justrl_chat_lt2048_random2000_sft.yaml runs/sft/train_sft_ddp.sh`。DDP 下有效 batch 为 `batch_size * gradient_accumulation_steps * GPU 数量`；若要保持单卡等效 batch，需要同步调小 `gradient_accumulation_steps` 或 `batch_size`。
+- Qwen3-1.7B BF16 LoRA 全量 clean<2048 对照已完成，模型基座为本地 `Qwen/Qwen3-1.7B`，数据为 `data/stage1/mix_long_justrl_chat_lt2048_all_consistent/train.jsonl`，训练三卡 DDP，`batch_size=4`、`gradient_accumulation_steps=3`、`save_steps=25`、`max_seq_length=2048`。SFT dev200 最优为 `checkpoint-100`，DFT dev200 最优为 `checkpoint-25`。当前已实现 `loss_mode=asft_topk`，使用 LoRA `disable_adapter()` 取 base topK reference，默认 `asft_top_k=32`、`asft_kl_weight=0.03`，配置为 `configs/stage1/qwen3_1p7b_mix_long_justrl_chat_lt2048_all_consistent_asft_topk.yaml`。
+- Qwen3-1.7B BF16 LoRA 全量 clean<2048 benchmark：SFT `checkpoint-100` 在 MATH500/GSM8K 为 `0.644 / 0.7885`，平均输出 `555.4 / 618.9` tokens；DFT `checkpoint-25` 为 `0.656 / 0.7923`，平均输出 `329.5 / 208.7` tokens；ASFT-topK dev200 最优 `checkpoint-50` 为 `0.680 / 0.8120`，平均输出 `565.3 / 610.6` tokens。当前同口径下 ASFT-topK 明显优于 SFT/DFT，但输出长度接近 SFT。
+- 该 Qwen3 SFT/ASFT 评测暴露明显尾部重复风险：SFT GSM8K 首题生成 `Final Answer: \boxed{26}` 大量重复直到接近截断；ASFT `checkpoint-50` 也会出现 `Final Answer: \boxed{...}` 或整段推理重复，启发式统计 MATH500 约 `144/500`、GSM8K 约 `599/1319` 有多 boxed/Final Answer 重复嫌疑。训练集 `5119` 条中 `Final Answer` 多次出现约 `297` 条、尾部相同 boxed 重复约 `9` 条，说明问题不是数据全集崩坏，而是格式噪声放大后触发生成循环。后续应对训练数据尾部去重，并在评测中同时关注准确率、长度和重复率。
 - 当前 ConPress 压缩策略见 `docs/analysis/conpress_compression_policy.md`，实验细节见 `docs/analysis/conpress_probe_diagnostics.md`。主文本桶仍用 `exclude_visual + balanced_level + default prompt`，但 visual/asy 不再一刀切丢弃；Qwen3-4B visual 消融为 `format_ok=12/12`、`parse=36/36`、`boxed=36/36`、`correct=25/36`，visual 子集 `8/12` 正确。当前建议 visual/asy 单独成桶，强过滤后按 `5%-10%` 混入。
 - Qwen3-4B-2507 Thinking 5k 数据 `data/rsr/qwen3_4b_2507/short-sys_5k_gen1.json` 中可精确匹配到 `1667` 条 Hendrycks MATH train 题，且只覆盖 Level 4/5；完整 answer 平均约 `9560` tokenizer tokens，`p95` 约 `23343`，max 约 `31003`，当前不适合直接 SFT。`</think>` 后 summary 平均约 `772` tokens，可作为未来 clean-solution 候选，但该路线暂时搁置。
 - 当前主环境中 `unsloth 2025.9.9 + trl 0.26.2` 会在 import 阶段生成非法 `UnslothGRPOTrainer.py`，SFT 小实验短期已切到 `backend=trl_peft`，避免被 Unsloth 的 GRPO patch 兼容问题阻塞；后续若继续使用 Unsloth，应单独整理兼容环境。
@@ -79,6 +83,7 @@
 9. Qwen3-4B-2507 Thinking 完整思维链过长，暂不进入当前主线；如后续恢复，只考虑 summary-only 数据。
 10. 教师 SFT rollout 长任务后续默认用 `tmux` 后台分 shard 运行，并写入 `logs/` 与 `jobs.json`；避免直接在当前终端前台阻塞。
 11. 旧路线文档仍在仓库中保留，必须继续和当前 `GRPO` 主线区分，不自动视为当前推荐配置。
+12. Qwen3-1.7B 全量 clean<2048 的 DFT 在 dev200 上 `ckpt25` 最好，后续 ckpt 整体变弱；这支持“DFT 易分布漂移”的判断。当前已实现轻量 `asft_topk` anchor，下一步应先做 smoke 与同口径 checkpoint 选择，而不是继续加 DFT epoch。
 
 ## 当前优先级
 
@@ -86,6 +91,7 @@
 2. 优化 checkpoint 选择链路，避免每个 checkpoint 反复重启 `vLLM`。
 3. 继续盯 `boxed_rate / parse_success_rate / clipped_ratio / entropy`，确认当前 reward 与长度设置不会在早期破坏格式输出。
 4. 只有当单 seed 结果达到“至少不差于基线”时，再考虑做 `3 seed` 复验，而不是现在就对每组配置做多 seed 全覆盖。
+5. 若短期继续 SFT/DFT 路线，优先运行 `loss_mode=asft_topk` 对照：LoRA 下用 `disable_adapter()` 取 base/reference topK，`topK=32`、`kl_weight=0.03` 作为默认试验，目标是抑制 DFT 后续 ckpt 退化并保持短输出。
 
 ## 当前 GRPO 口径
 
@@ -116,6 +122,26 @@
 - 当前状态看 `docs/STATE.md`
 - 评测结果总表看 `docs/analysis/eval_leaderboard.md`
 - 评测结果维护命令看 `docs/runbooks/eval.md`
+- SFT 运行说明看 `docs/runbooks/sft.md`
 - MLflow 使用说明看 `docs/runbooks/mlflow.md`
 - `GRPO` 运行与操作说明看 `docs/runbooks/grpo.md`
 - 旧路线实验记录看 `docs/experiments/README.md` 与 `docs/experiments/two-stage-sft-simpo.md`
+
+## 2026-05-04 增量状态
+
+### 90 服务器缓存新增
+- 已下载模型：
+  - `nvidia/OpenMath-Nemotron-1.5B`
+  - `Qwen/Qwen3-1.7B`
+  - `Qwen/Qwen3-4B-Thinking-2507`
+  - `Keven16/Qwen3-4B-Non-Thinking-RL-Math-Step500`
+  - `hbx/JustRL-Nemotron-1.5B`
+- 已下载数据集：
+  - `UWNSL/Mix-Long_long_0.2_short_0.8`
+  - `open-r1/DAPO-Math-17k-Processed`
+- 项目数据新增：
+  - `data/rsr/qwen3_4b_2507/short-sys_5k_gen1.json`
+
+### 代理守护
+- 本地现在使用 `scripts/watch_proxy_tunnels.py` 守护 `90/94` 的 `ssh -R` 隧道。
+- 健康检查以远端真实 `curl https://www.google.com` 为准，不再只看端口或进程。

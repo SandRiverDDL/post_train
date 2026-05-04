@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.sft import (
     LightningOPDDataCollator,
+    _compute_asft_topk_loss,
+    _compute_asft_topk_loss_from_logits,
     _compute_lightning_opd_loss,
     _compute_sft_loss,
     _extract_model_inputs,
@@ -56,6 +59,52 @@ class RecordingChatTokenizer:
         self.texts.append(text)
         pieces = [piece for piece in text.split() if piece]
         return {"input_ids": list(range(1, len(pieces) + 1))}
+
+
+class TinyOutput:
+    def __init__(self, logits: torch.Tensor) -> None:
+        self.logits = logits
+
+
+class TinyAdapterModel:
+    def __init__(self) -> None:
+        self.adapter_disabled = False
+        self.events: list[str] = []
+        self.base_logits = torch.tensor(
+            [
+                [
+                    [0.0, 4.0, 2.0],
+                    [3.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        self.current_logits = torch.tensor(
+            [
+                [
+                    [0.0, 3.0, 1.0],
+                    [2.0, 0.0, 3.0],
+                    [0.0, 0.0, 0.0],
+                ]
+            ],
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+
+    @contextmanager
+    def disable_adapter(self):
+        self.adapter_disabled = True
+        self.events.append("disable")
+        try:
+            yield
+        finally:
+            self.adapter_disabled = False
+            self.events.append("enable")
+
+    def __call__(self, **kwargs):
+        self.events.append("base" if self.adapter_disabled else "current")
+        return TinyOutput(self.base_logits if self.adapter_disabled else self.current_logits)
 
 
 class SFTTokenizationTest(unittest.TestCase):
@@ -222,6 +271,89 @@ class SFTProfitLossTest(unittest.TestCase):
         self.assertEqual(loss.item(), 0.0)
         self.assertEqual(metrics["valid_tokens"], 0.0)
         self.assertEqual(metrics["empty_batches"], 1.0)
+
+    def test_compute_asft_topk_loss_combines_dft_and_truncated_kl(self) -> None:
+        current_logits = torch.tensor(
+            [
+                [
+                    [0.0, 3.0, 1.0, -1.0],
+                    [2.0, 0.0, 3.0, -1.0],
+                    [0.0, 0.0, 0.0, 0.0],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        labels = torch.tensor([[-100, 1, 2]], dtype=torch.long)
+        base_topk_token_ids = torch.tensor([[[1, 2], [2, 0]]], dtype=torch.long)
+        base_topk_logits = torch.tensor([[[4.0, 2.0], [3.0, 1.0]]], dtype=torch.float32)
+
+        loss, metrics = _compute_asft_topk_loss_from_logits(
+            current_logits,
+            base_topk_token_ids,
+            base_topk_logits,
+            labels,
+            asft_kl_weight=0.5,
+        )
+
+        shift_logits = current_logits[..., :-1, :]
+        shift_labels = labels[..., 1:]
+        safe_labels = shift_labels.masked_fill(shift_labels.eq(-100), 0)
+        token_nll = shift_logits.logsumexp(dim=-1) - shift_logits.gather(
+            dim=-1,
+            index=safe_labels.unsqueeze(-1),
+        ).squeeze(-1)
+        gold_prob = torch.exp(-token_nll.detach())
+        expected_dft = (gold_prob * token_nll).mean()
+        base_log_probs = base_topk_logits - base_topk_logits.logsumexp(dim=-1, keepdim=True)
+        base_probs = base_log_probs.exp()
+        current_topk_logits = shift_logits.gather(dim=-1, index=base_topk_token_ids)
+        current_topk_log_probs = current_topk_logits - current_topk_logits.logsumexp(dim=-1, keepdim=True)
+        expected_kl = (base_probs * (base_log_probs - current_topk_log_probs)).sum(dim=-1).mean()
+
+        self.assertAlmostEqual(loss.item(), (expected_dft + 0.5 * expected_kl).item(), places=6)
+        self.assertAlmostEqual(metrics["asft_dft_loss"], expected_dft.item(), places=6)
+        self.assertAlmostEqual(metrics["asft_topk_kl_loss"], expected_kl.item(), places=6)
+        self.assertEqual(metrics["valid_tokens"], 2.0)
+
+    def test_compute_asft_topk_loss_returns_zero_for_empty_batch(self) -> None:
+        current_logits = torch.zeros((1, 3, 4), dtype=torch.float32)
+        labels = torch.full((1, 3), -100, dtype=torch.long)
+        base_topk_token_ids = torch.zeros((1, 2, 2), dtype=torch.long)
+        base_topk_logits = torch.zeros((1, 2, 2), dtype=torch.float32)
+
+        loss, metrics = _compute_asft_topk_loss_from_logits(
+            current_logits,
+            base_topk_token_ids,
+            base_topk_logits,
+            labels,
+            asft_kl_weight=0.5,
+        )
+
+        self.assertEqual(loss.item(), 0.0)
+        self.assertEqual(metrics["valid_tokens"], 0.0)
+        self.assertEqual(metrics["empty_batches"], 1.0)
+
+    def test_compute_asft_topk_loss_uses_disabled_adapter_reference_first(self) -> None:
+        model = TinyAdapterModel()
+        inputs = {
+            "input_ids": torch.tensor([[1, 2, 3]], dtype=torch.long),
+            "attention_mask": torch.tensor([[1, 1, 1]], dtype=torch.long),
+        }
+        labels = torch.tensor([[-100, 1, 2]], dtype=torch.long)
+
+        loss, metrics, outputs = _compute_asft_topk_loss(
+            model,
+            inputs,
+            labels,
+            asft_top_k=2,
+            asft_kl_weight=0.03,
+        )
+
+        self.assertTrue(torch.isfinite(loss))
+        self.assertIs(outputs.logits, model.current_logits)
+        self.assertEqual(model.events, ["disable", "base", "enable", "current"])
+        self.assertEqual(metrics["asft_top_k"], 2.0)
+        self.assertEqual(metrics["valid_tokens"], 2.0)
 
     def test_compute_sft_loss_returns_zero_when_all_supervised_tokens_are_filtered(self) -> None:
         logits = torch.tensor(

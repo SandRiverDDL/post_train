@@ -70,15 +70,28 @@ loss = mean_valid(dft_t + lambda * kl_t)
 
 本仓库当前实现路线：
 
-- 先支持 `loss_mode: dft`，不引入 reference model。
-- DFT 使用当前 forward 的 gold-token probability 做 stop-gradient 权重。
-- 先不实现 ASFT full KL，避免在 3090 上引入额外 reference forward 和 full-vocab KL 显存风险。
+- 已支持 `loss_mode: dft`，使用当前 forward 的 gold-token probability 做 stop-gradient 权重。
+- 已支持 `loss_mode: asft_topk`，使用 LoRA `disable_adapter()` 获取 base/reference topK，并计算 topK truncated `KL(base || current)`。
+- 仍不实现 ASFT full KL，避免在 3090 上引入额外 reference forward 和 full-vocab KL 中间张量风险。
 
-后续如果实现 ASFT：
+当前 `asft_topk` 口径：
 
-- 增加 `asft_kl_weight`。
-- LoRA 下优先用 adapter-disabled logits 作为 `pi_base`。
-- 非 LoRA 下需要显式加载 frozen reference model，或先不支持。
+- 默认 `asft_top_k=32`、`asft_kl_weight=0.03`。
+- 先 no-grad base forward 取 topK，释放 base full logits 后再 current forward。
+- KL 在 base topK support 内重新归一化，只近似 full-vocab forward KL。
+- 非 LoRA / 非 `trl_peft` 路径暂不支持。
+
+## 当前实测
+
+Qwen3-1.7B BF16 LoRA、Mix-Long clean<2048、三卡 DDP、同一评测口径下：
+
+| 方法 | best ckpt | MATH500 | GSM8K | 平均输出 tokens |
+|---|---:|---:|---:|---|
+| SFT | 100 | 0.644 | 0.7885 | 555.4 / 618.9 |
+| DFT | 25 | 0.656 | 0.7923 | 329.5 / 208.7 |
+| ASFT-topK | 50 | 0.680 | 0.8120 | 565.3 / 610.6 |
+
+当前结论：ASFT-topK 是这组三者里最好的候选，MATH500 和 GSM8K 都有提升；但它没有继承 DFT 的短输出优势，且仍会出现尾部 `\boxed{}` 或 `Final Answer` 重复。因此 ASFT-topK 当前适合作为强一点的 stage1 对照，不应被描述成已经解决格式稳定性问题。
 
 ## 和 OPD / topK KD 的区别
 
