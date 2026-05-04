@@ -29,7 +29,7 @@ class LightningOPDDataConfig(BaseModel):
     max_model_len: int = Field(default=2560, ge=1)
     temperature: float = Field(default=0.6, ge=0.0)
     top_p: float = Field(default=0.95, gt=0.0, le=1.0)
-    top_k: int = Field(default=32, ge=1)
+    top_k: int = Field(default=32, ge=0)
     teacher_batch_size: int = Field(default=1, ge=1)
     gpu_memory_utilization: float = Field(default=0.85, gt=0.0, le=1.0)
     teacher_load_in_4bit: bool = True

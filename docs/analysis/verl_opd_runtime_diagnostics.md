@@ -125,6 +125,37 @@ teacher vLLM: BF16
 
 后续若 baseline 跑通，可以单独开分支测试 student vLLM 量化；teacher 量化应更谨慎。
 
+## Qwen3-4B teacher 与 ConPress student 风险
+
+如果用 `Keven16/Qwen3-4B-Non-Thinking-RL-Math-Step500` 作为 teacher、ConPress Qwen3-1.7B checkpoint 作为 student，tokenizer 和 Qwen3 chat template 基本一致，且 teacher rollout 已显式 `enable_thinking=false`。因此主要风险不是 literal tokenizer mismatch，也不是 `<think>` token 本身。
+
+更大的风险是风格与长度分布错配：
+
+- ConPress student 学到的是压缩、短解、强制 boxed 的输出分布。
+- Qwen3-4B Non-Thinking teacher 在剩余 837 个 hard-tail 失败题上的正常 prompt rollout 平均 `5777.7` tokens，p50 `7869`，约 `49%` 打满 `8192`，correct 只有 `14.22%`。
+- 标准 sampled-token OPD 只在 student sampled tokens 上看 teacher logprob；如果 teacher 更偏好长推理或重复展开，可能会系统性压低正确短解 token 的 teacher gap。
+- 这会让 OPD 信号表现为“teacher 不是在奖励更好的答案，而是在惩罚学生的压缩风格”。
+
+当前建议：
+
+- 不要把 837 hard-tail raw rollout 当作 OPD 主训练数据。
+- OPD prompt 池优先使用 ConPress 已成功且长度合理的 prompt，尤其是 `prompt + solution <= 2048` 的子集。
+- 标准 OPD 长跑前先抽 `100-200` 条做 gap 诊断：统计 `teacher_logprob - student_logprob` 的均值、负 gap 比例、按 token 类型分布、boxed/答案段附近 gap。
+- 如果 sampled-token gap 大面积为负，优先转向 top-K support / sparse reverse-KL，而不是直接扩大 OPD epoch。
+
+## 当前 ASFT sampled-token 数据任务
+
+当前用 ConPress ASFT best checkpoint 先做 offline Lightning-OPD 数据准备，而不是直接启动 verl 长跑：
+
+- student：`outputs/stage1_conpress_qwen3_1p7b_asft_topk/checkpoint-175`
+- teacher：`Keven16/Qwen3-4B-Non-Thinking-RL-Math-Step500`
+- query：2000 条 Hendrycks MATH train，已渲染 Qwen3 chat template + no-think prefill
+- 配置：`configs/lightning_opd/conpress_asft_qwen3_4b_teacher_math2000.yaml`
+- 输出：`data/lightning_opd/conpress_asft_qwen3_4b_teacher_math2000_20260504`
+- 状态：不过滤数据准备已完成，student raw rollout 与 BF16 teacher sampled-token forward 均为四个 shard 各 `500` 条；`train.jsonl` 共 `2000` 行，`shape_errors=0`；当前代码已改为 sampled-token `target_logit - logsumexp(logits)`，本轮配置 `top_k=0`、`teacher_load_in_4bit=false`
+
+不过滤 Lightning-OPD 已完成训练与评测，best 为 `outputs/lightning_opd_conpress_asft_qwen3_4b_teacher_math2000_unfiltered/checkpoint-30`。dev200 为 `0.630`，benchmark MATH500/GSM8K 为 `0.678 / 0.8135`，高于 ConPress ASFT 起点 `0.654 / 0.8006`；但 MATH500 boxed rate 从 `0.850` 降到 `0.824`，平均输出也从 `333.8` 增至 `394.2` tokens。训练日志显示 `avg_teacher_logprob` 多数低于 `avg_student_logprob`，说明 sampled-token gap 倾向负值；迁移到标准 verl OPD 前仍应先做格式过滤或 topK support 对照，而不是直接扩大 epoch。
+
 ## 当前建议
 
 先跑通标准 verl OPD：

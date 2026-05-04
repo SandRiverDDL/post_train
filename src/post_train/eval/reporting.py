@@ -26,18 +26,22 @@ def _metric_accuracy(metrics: dict[str, Any]) -> float | None:
 
 
 def _task_from_dataset(dataset: str) -> str:
-    stem = Path(dataset).stem
-    if stem.endswith("_test"):
-        return stem[: -len("_test")]
+    stem = _normalize_task_name(Path(dataset).stem)
     if stem == "global_dev_math500_150":
         return "math500_dev150"
     return stem
 
 
+def _normalize_task_name(task: str) -> str:
+    if task.endswith("_test"):
+        return task[: -len("_test")]
+    return task
+
+
 def _task_from_result_path(path: Path, metrics: dict[str, Any]) -> str:
     task = path.parent.name
     if task and task != "outputs":
-        return task
+        return _normalize_task_name(task)
     return _task_from_dataset(str(metrics.get("dataset", "")))
 
 
@@ -317,8 +321,7 @@ def render_leaderboard(rows: list[dict[str, Any]]) -> str:
                 )
                 + " |"
             )
-    lines.append("")
-    return "\n".join(lines)
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def write_eval_report(

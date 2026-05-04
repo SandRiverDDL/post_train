@@ -10,7 +10,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from post_train.io import read_jsonl, write_jsonl
-from post_train.lightning_opd.data import build_lightning_opd_prompts, merge_lightning_opd_shards, select_shard_rows
+from post_train.lightning_opd.data import (
+    _sampled_logprobs_and_topk,
+    build_lightning_opd_prompts,
+    merge_lightning_opd_shards,
+    select_shard_rows,
+)
 
 
 class LightningOPDDataTest(unittest.TestCase):
@@ -81,6 +86,19 @@ class LightningOPDDataTest(unittest.TestCase):
         self.assertEqual(report["shape_errors"], 0)
         self.assertEqual(report["top_k_values"], [2])
         self.assertEqual(report_payload["train_rows"], 2)
+
+    def test_sampled_logprobs_matches_dense_log_softmax(self) -> None:
+        import torch
+
+        logits = torch.tensor([[1.0, 2.0, 4.0], [0.5, -1.0, 0.0]], dtype=torch.float32)
+        target_ids = torch.tensor([2, 0], dtype=torch.long)
+
+        sampled_logprobs, topk_ids, topk_logprobs = _sampled_logprobs_and_topk(logits, target_ids, top_k=2)
+        dense_logprobs = torch.log_softmax(logits, dim=-1)
+
+        self.assertEqual(topk_ids, [[2, 1], [0, 2]])
+        self.assertTrue(torch.allclose(torch.tensor(sampled_logprobs), dense_logprobs[torch.arange(2), target_ids]))
+        self.assertTrue(torch.allclose(torch.tensor(topk_logprobs[0]), dense_logprobs[0, torch.tensor(topk_ids[0])]))
 
 
 if __name__ == "__main__":

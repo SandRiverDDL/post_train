@@ -1,0 +1,22 @@
+output_dir: data/lightning_opd/conpress_asft_qwen3_4b_teacher_math2000_20260504
+prompt_source: data/lightning_opd/query_sources/conpress_asft_qwen3_chat_math2000_seed42.jsonl
+sample_size: 2000
+seed: 42
+num_shards: 4
+
+student_model: outputs/stage1_conpress_qwen3_1p7b_asft_topk/checkpoint-175
+student_base_model: /mnt/dataset/fengshuwen/hf_cache/hub/models--Qwen--Qwen3-1.7B/snapshots/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e
+teacher_model: /mnt/dataset/fengshuwen/hf_cache/hub/models--Keven16--Qwen3-4B-Non-Thinking-RL-Math-Step500/snapshots/05d82d02780d4a6f8295b2909dbbd89e8a8b5aaa
+tokenizer_name: /mnt/dataset/fengshuwen/hf_cache/hub/models--Qwen--Qwen3-1.7B/snapshots/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e
+
+max_new_tokens: 2048
+max_model_len: 4096
+temperature: 0.8
+top_p: 0.9
+top_k: 0
+teacher_batch_size: 4
+gpu_memory_utilization: 0.70
+teacher_load_in_4bit: false
+
+gpu0: 0
+gpu1: 1

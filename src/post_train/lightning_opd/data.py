@@ -92,6 +92,49 @@ def _is_lora_adapter(path: str | Path) -> bool:
     return (Path(path) / "adapter_config.json").exists()
 
 
+def _read_lora_rank(path: str | Path) -> int | None:
+    adapter_config_path = Path(path) / "adapter_config.json"
+    if not adapter_config_path.exists():
+        return None
+    payload = json.loads(adapter_config_path.read_text(encoding="utf-8"))
+    rank = payload.get("r")
+    return int(rank) if rank is not None else None
+
+
+def _sampled_logprobs_and_topk(
+    logits: "torch.Tensor",
+    target_ids: "torch.Tensor",
+    *,
+    top_k: int,
+) -> tuple[list[float], list[list[int]], list[list[float]]]:
+    import torch
+
+    if logits.ndim != 2:
+        raise ValueError(f"logits 必须是 [tokens, vocab]，实际 shape={tuple(logits.shape)}")
+    if target_ids.ndim != 1 or target_ids.shape[0] != logits.shape[0]:
+        raise ValueError(
+            f"target_ids 必须是 [tokens] 且与 logits 对齐，实际 target={tuple(target_ids.shape)} logits={tuple(logits.shape)}"
+        )
+
+    # sampled-token OPD 只需要目标 token 的 logprob；不要 materialize [tokens, vocab] 的 log_softmax。
+    work_logits = logits.float()
+    log_denominators = torch.logsumexp(work_logits, dim=-1)
+    target_logits = work_logits.gather(dim=-1, index=target_ids.unsqueeze(-1)).squeeze(-1)
+    token_logprobs = (target_logits - log_denominators).tolist()
+
+    if top_k <= 0:
+        return [float(value) for value in token_logprobs], [[] for _ in token_logprobs], [[] for _ in token_logprobs]
+
+    k = min(int(top_k), int(work_logits.shape[-1]))
+    top_values, top_indices = torch.topk(work_logits, k=k, dim=-1)
+    top_logprobs = top_values - log_denominators.unsqueeze(-1)
+    return (
+        [float(value) for value in token_logprobs],
+        [[int(token_id) for token_id in row] for row in top_indices.tolist()],
+        [[float(value) for value in row] for row in top_logprobs.tolist()],
+    )
+
+
 def _rollout_with_vllm(
     prompt_rows: list[dict[str, Any]],
     *,
@@ -119,6 +162,9 @@ def _rollout_with_vllm(
             raise ValueError("student_model 是 LoRA adapter 时必须提供 student_base_model。")
         model_path = str(student_base_model)
         llm_kwargs["enable_lora"] = True
+        lora_rank = _read_lora_rank(student_model)
+        if lora_rank is not None:
+            llm_kwargs["max_lora_rank"] = lora_rank
         lora_request = LoRARequest("lightning_opd_student_adapter", 1, str(student_model))
 
     llm = LLM(model=model_path, **llm_kwargs)
@@ -133,6 +179,20 @@ def _rollout_with_vllm(
     started_at = time.perf_counter()
     outputs = llm.generate(prompts, sampling_params=sampling_params, use_tqdm=True, lora_request=lora_request)
     total_seconds = time.perf_counter() - started_at
+    engine = getattr(llm, "llm_engine", None)
+    shutdown = getattr(engine, "shutdown", None)
+    if callable(shutdown):
+        shutdown()
+    del llm
+    try:
+        import gc
+        import torch
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
 
     raw_rows: list[dict[str, Any]] = []
     lengths: list[int] = []
@@ -248,8 +308,7 @@ def _token_logprobs_and_topk(
                 dtype=torch.long,
                 device=device,
             )
-            logits = model(input_ids=input_tensor, attention_mask=attention_mask).logits.float()
-            log_probs = torch.log_softmax(logits[:, :-1, :], dim=-1)
+            logits = model(input_ids=input_tensor, attention_mask=attention_mask).logits
             for batch_index, item in enumerate(batch):
                 input_ids = item["input_ids"]
                 response_positions = [
@@ -257,16 +316,23 @@ def _token_logprobs_and_topk(
                     for pos, mask_value in enumerate(item["response_mask"])
                     if mask_value and pos > 0
                 ]
-                token_logprobs: list[float] = []
-                topk_token_ids: list[list[int]] = []
-                topk_logprobs: list[list[float]] = []
-                for pos in response_positions:
-                    distribution = log_probs[batch_index, pos - 1]
-                    target_id = int(input_ids[pos])
-                    token_logprobs.append(float(distribution[target_id].item()))
-                    values, indices = torch.topk(distribution, k=top_k)
-                    topk_token_ids.append([int(value) for value in indices.tolist()])
-                    topk_logprobs.append([float(value) for value in values.tolist()])
+                if response_positions:
+                    position_tensor = torch.tensor([pos - 1 for pos in response_positions], dtype=torch.long, device=device)
+                    target_tensor = torch.tensor(
+                        [int(input_ids[pos]) for pos in response_positions],
+                        dtype=torch.long,
+                        device=device,
+                    )
+                    token_logits = logits[batch_index].index_select(dim=0, index=position_tensor)
+                    token_logprobs, topk_token_ids, topk_logprobs = _sampled_logprobs_and_topk(
+                        token_logits,
+                        target_tensor,
+                        top_k=top_k,
+                    )
+                else:
+                    token_logprobs = []
+                    topk_token_ids = []
+                    topk_logprobs = []
                 row = item["row"]
                 meta = dict(row.get("meta", {}))
                 meta.update(

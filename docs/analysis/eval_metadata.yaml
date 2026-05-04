@@ -27,6 +27,13 @@ models:
     role: bad_run
     ignore: true
     notes: 异常低分历史结果，暂不进入主表
+  outputs/lightning_opd_conpress_asft_qwen3_4b_teacher_math2000_unfiltered/checkpoint-30:
+    method: Lightning-OPD
+    label: ConPress ASFT OPD unfiltered ckpt30
+    role: experiment
+    ignore: false
+    notes: ConPress ASFT ckpt175 起点；2000 条不过滤 sampled-token OPD；dev200 选 ckpt30；MATH500/GSM8K
+      高于 ASFT，但 MATH500 boxed 下降
   outputs/lightning_opd_nemotron_candidate_ddp_gpu1_6_b1:
     method: Lightning-OPD
     label: OPD Nemo from base mistake
@@ -39,6 +46,24 @@ models:
     role: experiment
     ignore: false
     notes: max_new_tokens=2048 后 MATH500=0.690
+  outputs/stage1_conpress_qwen3_1p7b_asft_topk/checkpoint-175:
+    method: ASFT-topK
+    label: ConPress Qwen3-1.7B ASFT-topK ckpt175
+    role: experiment
+    ignore: false
+    notes: ConPress 成功压缩数据 QLoRA ASFT-topK；dev200 选 ckpt175；GSM8K 优于 SFT/DFT
+  outputs/stage1_conpress_qwen3_1p7b_dft/checkpoint-50:
+    method: DFT
+    label: ConPress Qwen3-1.7B DFT ckpt50
+    role: experiment
+    ignore: false
+    notes: ConPress 成功压缩数据 no-think 重训；dev200 选 ckpt50；准确率低于 SFT
+  outputs/stage1_conpress_qwen3_1p7b_sft/checkpoint-175:
+    method: SFT
+    label: ConPress Qwen3-1.7B SFT ckpt175
+    role: experiment
+    ignore: false
+    notes: ConPress 成功压缩数据 no-think 重训；dev200 选 ckpt175
   outputs/stage1_mix_long_sft/checkpoint-300:
     method: SFT
     label: SFT mix-long ckpt300

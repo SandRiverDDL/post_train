@@ -70,8 +70,15 @@
 - 当前教师 SFT rollout 已从 Lightning-OPD 中拆出，入口为 `scripts/rollout_teacher_sft.py`，核心逻辑为 `src/post_train/rollout/teacher_sft.py`。该入口只生成 raw SFT rollout，不生成 `teacher_topk`；默认输出目录为 `data/rollout/teacher_sft/...`，支持 `prompts -> shard -> merge` 与 `launch` tmux 后台分片。
 - Qwen3 Non-Thinking 教师 rollout 默认必须使用 Qwen3 chat template，并显式设置 `chat_template_enable_thinking=false`；此时空 `<think>\n\n</think>\n\n` 位于 rendered prompt 中，不应期待 generated response 再包含 `<think>`。
 - 当前 ConPress 全量压缩 rollout 已完成两轮：首轮 7497 题重判后正确 `5966/7497=79.58%`；对剩余 1531 题做 ConPress `N=3, spp=4` 失败池重采样后，新增任一正确 694 题，合并预计覆盖 `6660/7497=88.84%`，仍失败 837 题。剩余失败按 level 为：L1 29/564、L2 70/1348、L3 105/1592、L4 131/1690、L5 502/2303；失败高度集中在 Level 5。
-- 下一轮不继续使用 ConPress 多题压缩 prompt 重采样剩余 837 题；改用单题正常 eval prompt、Qwen3 chat template、`max_new_tokens=8192`、每题 4 采样，目标是提高 hard-tail 覆盖，同时降低多题 answer pairing 与格式损失。
-- 当前 ConPress Qwen3-1.7B 重训诊断见 `docs/analysis/conpress_qwen3_sft_dft_diagnostics.md`：EOS 修复后但 no-think training prefill 修复前的 SFT/DFT checkpoint，在默认 chat eval 下 boxed 偏低；补 no-think eval 后 boxed 明显恢复，但 acc 没有同步上升。因此低 boxed 主因是 thinking/prompt/长度口径，acc 问题更可能来自数据质量、训练信号或与 UWLS 数据分布差异。
+- 剩余 837 题已改用单题正常 eval prompt、Qwen3 chat template、`max_new_tokens=8192`、每题 1 条采样试水：平均 `5777.7` tokens，p50 `7869`，约 `49%` 打满长度上限，boxed `57.11%`，parse `56.87%`，correct `14.22%`。该 hard-tail batch 不适合作为 raw SFT/ASFT/OPD 数据，只能作为失败分析或严格过滤后的候选池。
+- 当前 ConPress Qwen3-1.7B no-think SFT/DFT 已完成重训与并行选 ckpt，诊断见 `docs/analysis/conpress_qwen3_sft_dft_diagnostics.md`。SFT best `checkpoint-175` 在 MATH500/GSM8K 为 `0.652 / 0.7741`，平均输出 `327.7 / 108.8` tokens；DFT best `checkpoint-50` 为 `0.632 / 0.7665`，平均输出 `239.5 / 91.3` tokens。结论是 ConPress SFT 可用，但 ConPress DFT 未复现 UWLS 上 DFT 优于 SFT 的收益。
+- 当前 ConPress 成功压缩训练集 `data/stage1/conpress_qwen3_4b_nt_correct_compressed/train.jsonl` 使用 Qwen3 chat/no-think tokenization 后，`prompt + solution` 共 6660 条，p50 `369`、p90 `1665`、p95 `2455`、p99 `4182`、max `6313`；超过 `2048` 的样本为 `487/6660=7.31%`，超过 `4096` 的样本为 `71/6660=1.07%`。
+- 当前 ConPress ASFT-topK QLoRA 已完成，配置为 `configs/stage1/conpress_qwen3_1p7b_asft_topk.yaml`。四卡 `batch_size=2` 曾 OOM，最终使用 `batch_size=1`、`gradient_accumulation_steps=8`，四卡有效 batch 为 `32`。并行 dev200 选择 best 为 `checkpoint-175`：dev200 `0.645`，boxed `0.830`，avg tokens `368.4`；benchmark MATH500/GSM8K 为 `0.654 / 0.8006`，boxed `0.850 / 0.9848`，平均输出 `333.8 / 109.7` tokens。结论是 ASFT 相比 SFT 在 GSM8K 明显提升，MATH500 基本持平，且没有 DFT 退化。
+- 当前 ConPress ASFT -> Qwen3-4B teacher 的不过滤 Lightning-OPD 数据已完成：配置 `configs/lightning_opd/conpress_asft_qwen3_4b_teacher_math2000.yaml`，输出目录 `data/lightning_opd/conpress_asft_qwen3_4b_teacher_math2000_20260504`。任务使用 2000 条 Hendrycks MATH train query、4 shard、GPU `0,1,2,4`；student 是 `outputs/stage1_conpress_qwen3_1p7b_asft_topk/checkpoint-175`，teacher 是 `Keven16/Qwen3-4B-Non-Thinking-RL-Math-Step500`。四个 shard 的 `raw_rollouts.jsonl` 与 sampled-token teacher forward 均已完成，每个 `500` 条；`train.jsonl` 共 `2000` 行，`shape_errors=0`，`top_k_values=[0]`。teacher scoring 使用 BF16 HF forward、`teacher_load_in_4bit=false`、`top_k=0`，只保存 sampled token logprob；实现已改为 `target_logit - logsumexp(logits)`，不再 materialize 完整 `[B, L, V]` log-softmax。
+- 当前不过滤 Lightning-OPD 已完成训练、四卡并行 dev best 选择和 benchmark：训练配置 `configs/lightning_opd/train_conpress_asft_qwen3_4b_teacher_math2000.yaml`，输出目录 `outputs/lightning_opd_conpress_asft_qwen3_4b_teacher_math2000_unfiltered`，训练起点为 ConPress ASFT `checkpoint-175`，四卡 `0,1,2,4`，共 `63` optimizer steps。dev200 best 为 `checkpoint-30`：acc `0.630`，boxed `0.785`，avg tokens `459.3`；benchmark MATH500/GSM8K 为 `0.678 / 0.8135`，boxed `0.824 / 0.9750`，平均输出 `394.2 / 138.5` tokens。相比 ConPress ASFT `checkpoint-175` 的 `0.654 / 0.8006`，不过滤 OPD 准确率有正收益，但 MATH500 boxed rate 下降、输出变长。
+- Qwen3 student rollout 做 OPD 数据准备时必须使用训练一致 prompt：`justrl_math` + Qwen3 chat template + `assistant_prefill="<think>\n\n</think>\n\n"`。本轮已生成显式渲染后的 query source：`data/lightning_opd/query_sources/conpress_asft_qwen3_chat_math2000_seed42.jsonl`，避免默认 Lightning-OPD Qwen2.5 裸 prompt 污染格式。
+- Lightning-OPD vLLM rollout 对 LoRA adapter 已补齐自动读取 `adapter_config.json` 中的 rank，并传入 `max_lora_rank`；本轮 ASFT LoRA rank 为 `32`，否则 vLLM 默认 `16` 会报 `LoRA rank 32 is greater than max_lora_rank 16`。student vLLM 生成后也会显式 shutdown 并释放 CUDA cache，再加载 teacher 做 sampled-token logprob，降低同卡 OOM 风险。
+- 若用 Qwen3-4B Non-Thinking 作为标准 OPD teacher，主要风险不是 tokenizer/template 不一致，而是 teacher 在 hard-tail 上严重长输出和低正确率，可能惩罚 ConPress student 的短解风格。本轮不过滤 OPD 的最终结果说明 sampled-token 信号不是完全无效：MATH500/GSM8K 均高于 ConPress ASFT 起点；但训练日志中 teacher logprob 多数低于 student logprob，且 MATH500 boxed rate 下降，后续仍应优先做格式过滤或 topK support，而不是直接扩大 epoch。
 
 ## 当前最重要的问题
 
@@ -88,12 +95,13 @@
 7. Lightning OPD 当前 topK=1 sampled-token 信号偏负，下一步若继续 OPD，应优先实现或测试 topK support loss，而不是直接增加 epoch。
 8. verl OPD 当前只完成数据与启动脚本准备；截断样本整条 mask 仍是正式长跑前建议补丁。
 9. verl OPD 弹性卡数调度不能简单把多数 GPU 分给 teacher；7/4/3 卡场景下应优先比较 `student rollout` 吞吐与 FSDP 通信开销。若需要严格 resume optimizer/FSDP 状态，`STUDENT_WORLD_SIZE` 必须在同一实验中保持不变；若允许只从 HF/LoRA 权重重启，则可改变 student 卡数但不再是完整训练状态 resume。
-10. ConPress 剩余 hard-tail 的下一步是单题正常 prompt 重采样，不再平均重跑已覆盖题；重采样完成后先合并为多 attempt 候选池，再抽取 `boxed && parse_ok && correct` 的最短正确轨迹。
-11. ConPress Qwen3-1.7B SFT/DFT 若继续作为主线，需要用 no-think prompt 口径彻底重训后再选 ckpt；已有 checkpoint 只能作为诊断结果，不适合直接和 UWLS 服务器结果下强结论。
+10. ConPress 剩余 hard-tail 单题正常 prompt 试水已经证明 raw rollout 质量很差，后续不能把这批长输出直接混入训练；若继续挖 hard-tail，只能多 attempt 后严格抽取 `boxed && parse_ok && correct` 且长度合理的轨迹。
+11. ConPress Qwen3-1.7B no-think SFT/DFT/ASFT 已完成一轮同口径对照；当前结论是 SFT 可用、DFT 相对收益不足、ASFT 在 GSM8K 上有收益但 MATH500 只持平。
 12. Qwen3-4B-2507 Thinking 完整思维链过长，暂不进入当前主线；如后续恢复，只考虑 summary-only 数据。
 13. 教师 SFT rollout 长任务后续默认用 `tmux` 后台分 shard 运行，并写入 `logs/` 与 `jobs.json`；避免直接在当前终端前台阻塞。
 14. 旧路线文档仍在仓库中保留，必须继续和当前 `GRPO` 主线区分，不自动视为当前推荐配置。
 15. Qwen3-1.7B 全量 clean<2048 的 DFT 在 dev200 上 `ckpt25` 最好，后续 ckpt 整体变弱；这支持“DFT 易分布漂移”的判断。当前已实现轻量 `asft_topk` anchor，下一步应先做 smoke 与同口径 checkpoint 选择，而不是继续加 DFT epoch。
+16. 标准 OPD 如果使用 Qwen3-4B Non-Thinking teacher 与 ConPress ASFT student，必须关注 teacher/student sampled-token gap；不能假设更大 teacher 自动提供正向训练信号。当前不过滤 2000 条 Lightning-OPD 最优 `checkpoint-30` 在 MATH500/GSM8K 达到 `0.678 / 0.8135`，说明 OPD 有收益；但 MATH500 boxed rate 低于 ASFT，下一步不应只扩大同一数据，而应先处理格式/重复污染或测试 topK support。
 
 ## 当前优先级
 
@@ -101,7 +109,8 @@
 2. 优化 checkpoint 选择链路，避免每个 checkpoint 反复重启 `vLLM`。
 3. 继续盯 `boxed_rate / parse_success_rate / clipped_ratio / entropy`，确认当前 reward 与长度设置不会在早期破坏格式输出。
 4. 只有当单 seed 结果达到“至少不差于基线”时，再考虑做 `3 seed` 复验，而不是现在就对每组配置做多 seed 全覆盖。
-5. 若短期继续 SFT/DFT 路线，优先运行 `loss_mode=asft_topk` 对照：LoRA 下用 `disable_adapter()` 取 base/reference topK，`topK=32`、`kl_weight=0.03` 作为默认试验，目标是抑制 DFT 后续 ckpt 退化并保持短输出。
+5. ConPress SFT/DFT/ASFT 暂停继续扩展，先用 ASFT best ckpt 做 OPD 数据诊断；如果后续再训练 ASFT，优先考虑 `<=2048` 长度过滤数据降低显存和墙钟成本。
+6. 当前不过滤 Lightning-OPD 已完成并取得小幅正收益；短期优先复核输出污染、boxed 下降和 sampled-token gap，再决定是否做过滤版、topK support 或切换 teacher。
 
 ## 当前 GRPO 口径
 
@@ -127,6 +136,9 @@
 ## 文档口径
 
 - 稳定规则看 `AGENTS.md`
+- 文档入口看 `docs/README.md`
+- 配置入口看 `configs/README.md`
+- 运行脚本入口看 `runs/README.md`
 - 当前阶段设计看 `docs/SPEC.md`
 - 结构分层看 `docs/ARCHITECTURE.md`
 - 当前状态看 `docs/STATE.md`

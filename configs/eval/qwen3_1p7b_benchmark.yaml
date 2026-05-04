@@ -1,0 +1,21 @@
+model_name: /mnt/dataset/fengshuwen/hf_cache/hub/models--Qwen--Qwen3-1.7B/snapshots/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e
+output_dir: outputs/eval
+backend: vllm
+attn_implementation: sdpa
+batch_size: 16
+max_new_tokens: 2048
+max_seq_length: 4096
+device: cuda
+gpu_memory_utilization: 0.70
+max_lora_rank: 32
+prompt_style: justrl_math
+use_chat_template: true
+system_prompt: ""
+assistant_prefill: "<think>\n\n</think>\n\n"
+
+seed: 42
+tasks:
+  - name: gsm8k
+    dataset_path: data/eval/gsm8k_test.jsonl
+  - name: math500
+    dataset_path: data/eval/math500_test.jsonl

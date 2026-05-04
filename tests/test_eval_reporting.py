@@ -101,6 +101,17 @@ class EvalReportingTest(unittest.TestCase):
         self.assertNotIn("dev only", main_table)
         self.assertIn("dev only", markdown)
 
+    def test_result_path_task_suffix_test_is_normalized(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            model = "outputs/demo/checkpoint-1"
+            dataset = "data/eval/math500_test.jsonl"
+            _write_result(tmp / "eval" / "demo" / "math500_test" / "result.json", model=model, dataset=dataset, score=0.7)
+
+            rows = discover_eval_rows(eval_root=tmp / "eval", manual_result_files=[])
+
+        self.assertEqual(rows[0]["task"], "math500")
+
     def test_untracked_models_are_hidden_from_leaderboard(self) -> None:
         rows = [
             {

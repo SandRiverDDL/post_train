@@ -144,6 +144,7 @@ max_steps: 100-300
 - 如果 rollout top-p 太宽，student 会进入 teacher 不熟悉的 prefix，top-K 监督仍可能误导。
 - 如果 K 太小，local support 信息不足；如果 K 太大，存储和 gather 开销上升。
 - 论文的主实验是 7B、16K response、H100 环境；本仓库 1.5B/3090 只能先吸收机制，不能按绝对分数复现。
+- 本仓库 ConPress 实验里，Qwen3-4B Non-Thinking teacher 在剩余 837 个 hard-tail 题上的单题正常 prompt rollout 平均 `5777.7` tokens，约 `49%` 打满 `8192`，correct 只有 `14.22%`；这说明同 tokenizer teacher 也可能因为长度和风格分布错配而给 sampled-token OPD 提供负信号。
 
 ## Smoke Test 建议
 
