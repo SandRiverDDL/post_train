@@ -7,9 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from datasets import Dataset
+from transformers import AutoTokenizer
 
 from post_train.io import ensure_parent, read_jsonl
 from post_train.prompts import build_eval_prompt
+from post_train.rollout.math_sft import build_math_query_pool
 
 
 DEFAULT_CANDIDATE_SOURCE = Path("data/on_policy_loop/query_strategy/candidate_pool.jsonl")
@@ -19,6 +21,11 @@ DEFAULT_DAPO_SOURCE = Path(
 )
 DEFAULT_SMOKE_OUTPUT_DIR = Path("../verl/data/opd_dapo17k/smoke128")
 DEFAULT_MIX_OUTPUT_DIR = Path("../verl/data/opd_mix/candidate1_dapo4_1k")
+DEFAULT_MATH_LEVEL_OUTPUT_DIR = Path("../verl/data/opd_math/hendrycks_l34_prompt256_1k_seed42")
+DEFAULT_QWEN3_1P7B_TOKENIZER = Path(
+    "/mnt/dataY/fsw/cache/huggingface/hub/models--Qwen--Qwen3-1.7B/"
+    "snapshots/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e"
+)
 
 
 def _write_json(path: str | Path, payload: dict[str, Any]) -> Path:
@@ -33,6 +40,33 @@ def _normalize_question(value: str) -> str:
 
 def _chat_prompt(question: str) -> list[dict[str, str]]:
     return [{"role": "user", "content": build_eval_prompt(question)}]
+
+
+def _percentile(values: list[int], percentile: float) -> float:
+    if not values:
+        return 0.0
+    sorted_values = sorted(values)
+    rank = (len(sorted_values) - 1) * percentile
+    lower = int(rank)
+    upper = min(lower + 1, len(sorted_values) - 1)
+    weight = rank - lower
+    return float(sorted_values[lower] * (1 - weight) + sorted_values[upper] * weight)
+
+
+def _prompt_token_length(
+    tokenizer: Any,
+    question: str,
+    *,
+    enable_thinking: bool,
+) -> int:
+    messages = _chat_prompt(question)
+    token_ids = tokenizer.apply_chat_template(
+        messages,
+        tokenize=True,
+        add_generation_prompt=True,
+        enable_thinking=enable_thinking,
+    )
+    return len(token_ids)
 
 
 def _candidate_row(row: dict[str, Any], *, source_path: str | Path, source_index: int) -> dict[str, Any]:
@@ -103,6 +137,35 @@ def _dapo_row(row: dict[str, Any], *, source_path: str | Path, source_index: int
         "ability": str(row.get("ability") or "math"),
         "reward_model": reward_model,
         "extra_info": extra_info,
+    }
+
+
+def _math_row(row: dict[str, Any], *, prompt_token_length: int) -> dict[str, Any]:
+    question = str(row.get("question", "")).strip()
+    if not question:
+        raise ValueError("MATH 样本缺少 question。")
+    answer = str(row.get("final_answer", "")).strip()
+    if not answer:
+        raise ValueError(f"MATH 样本缺少 final_answer：id={row.get('id')}")
+    meta = dict(row.get("meta", {}))
+    return {
+        "data_source": "math_dapo",
+        "prompt": _chat_prompt(question),
+        "ability": "math",
+        "reward_model": {"style": "rule", "ground_truth": answer},
+        "extra_info": {
+            "index": str(row.get("id", "")),
+            "source": "opd_math_hendrycks",
+            "source_dataset": str(meta.get("source_dataset", "")),
+            "source_split": str(meta.get("source_split", "")),
+            "source_index": int(meta.get("source_index", -1)),
+            "source_config": str(meta.get("source_config", "")),
+            "level": int(meta.get("level", -1)),
+            "type": str(meta.get("type", "")),
+            "question": question,
+            "final_answer": answer,
+            "prompt_token_length": prompt_token_length,
+        },
     }
 
 
@@ -205,6 +268,105 @@ def build_mix_dataset(
         "counts": {
             "opd_candidate": sum(1 for row in rows if row["extra_info"]["source"] == "opd_candidate"),
             "opd_dapo": sum(1 for row in rows if row["extra_info"]["source"] == "opd_dapo"),
+        },
+        "outputs": {"train": str(train_path)},
+    }
+    _write_json(Path(output_dir) / "report.json", report)
+    return report
+
+
+def build_math_level_dataset(
+    *,
+    output_dir: str | Path = DEFAULT_MATH_LEVEL_OUTPUT_DIR,
+    dataset_name: str = "EleutherAI/hendrycks_math",
+    split: str = "train",
+    levels: list[int] | None = None,
+    sample_size: int = 1000,
+    seed: int = 42,
+    max_prompt_tokens: int = 256,
+    tokenizer_name: str | Path = DEFAULT_QWEN3_1P7B_TOKENIZER,
+    chat_template_enable_thinking: bool = False,
+    cache_dir: str | None = "/mnt/dataY/fsw/cache/huggingface",
+) -> dict[str, Any]:
+    selected_levels = levels or [3, 4]
+    query_rows, pool_report = build_math_query_pool(
+        dataset_name=dataset_name,
+        split=split,
+        sample_size=None,
+        seed=seed,
+        levels=selected_levels,
+        cache_dir=cache_dir,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(str(tokenizer_name), trust_remote_code=True)
+
+    prompt_lengths: list[int] = []
+    filtered_rows: list[tuple[dict[str, Any], int]] = []
+    filtered_missing_answer = 0
+    filtered_over_prompt = 0
+    for row in query_rows:
+        if not str(row.get("final_answer", "")).strip():
+            filtered_missing_answer += 1
+            continue
+        prompt_len = _prompt_token_length(
+            tokenizer,
+            str(row["question"]),
+            enable_thinking=chat_template_enable_thinking,
+        )
+        prompt_lengths.append(prompt_len)
+        if prompt_len > max_prompt_tokens:
+            filtered_over_prompt += 1
+            continue
+        filtered_rows.append((row, prompt_len))
+
+    if sample_size > len(filtered_rows):
+        raise ValueError(
+            "MATH level 数据数量不足："
+            f"需要 {sample_size}，level 过滤后 {len(query_rows)}，"
+            f"prompt_token<={max_prompt_tokens} 后 {len(filtered_rows)}。"
+        )
+
+    rng = random.Random(seed)
+    sampled = rng.sample(filtered_rows, sample_size)
+    rows = [_math_row(row, prompt_token_length=prompt_len) for row, prompt_len in sampled]
+    rng.shuffle(rows)
+
+    train_path = _write_parquet(rows, output_dir)
+    sampled_lengths = [int(row["extra_info"]["prompt_token_length"]) for row in rows]
+    report = {
+        "mode": "math-levels",
+        "dataset_name": dataset_name,
+        "split": split,
+        "levels": selected_levels,
+        "sample_size": sample_size,
+        "seed": seed,
+        "max_prompt_tokens": max_prompt_tokens,
+        "tokenizer_name": str(tokenizer_name),
+        "chat_template_enable_thinking": chat_template_enable_thinking,
+        "pool_report": pool_report,
+        "counts": {
+            "level_filtered": len(query_rows),
+            "filtered_missing_answer": filtered_missing_answer,
+            "filtered_over_prompt_tokens": filtered_over_prompt,
+            "eligible_after_prompt_filter": len(filtered_rows),
+            "written": len(rows),
+        },
+        "prompt_token_length": {
+            "all_level_filtered": {
+                "min": min(prompt_lengths) if prompt_lengths else 0,
+                "mean": sum(prompt_lengths) / len(prompt_lengths) if prompt_lengths else 0.0,
+                "p50": _percentile(prompt_lengths, 0.50),
+                "p90": _percentile(prompt_lengths, 0.90),
+                "p95": _percentile(prompt_lengths, 0.95),
+                "max": max(prompt_lengths) if prompt_lengths else 0,
+            },
+            "sampled": {
+                "min": min(sampled_lengths) if sampled_lengths else 0,
+                "mean": sum(sampled_lengths) / len(sampled_lengths) if sampled_lengths else 0.0,
+                "p50": _percentile(sampled_lengths, 0.50),
+                "p90": _percentile(sampled_lengths, 0.90),
+                "p95": _percentile(sampled_lengths, 0.95),
+                "max": max(sampled_lengths) if sampled_lengths else 0,
+            },
         },
         "outputs": {"train": str(train_path)},
     }
